@@ -1,2 +1,4 @@
 results/
 .vscode/
+dump_pagemap
+check_contiguity
