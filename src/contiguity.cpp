@@ -176,8 +176,9 @@ int main(int argc, char* argv[]) {
     }
 
     // Print the results
-    cout << dec << fixed << setprecision(5) << regions << "\t" << r75 << "\t" << r50 << "\t" << r25 << "\t";
-    cout << total_pages << "\t" << hex << lowest_VPN << endl;
+    double rss_gb = double(total_pages) * 4096 / 1024 / 1024 / 1024;
+    cout << dec << fixed << setprecision(3) << regions << "\t" << r75 << "\t" << r50 << "\t" << r25 << "\t";
+    cout << rss_gb << " GB\t" << hex << lowest_VPN << endl;
 
     // Take an optional dump file as command line argument
     if (argc > 1) {
