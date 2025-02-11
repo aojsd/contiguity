@@ -189,9 +189,8 @@ int main(int argc, char **argv)
     // 8. List of base addresses for each mapping scanned
     double tracked_rss_gb = double(total_pages) * 4096 / 1024 / 1024 / 1024;
     double rss_gb = double(totalRSS) / 1024 / 1024 / 1024;
-    double rss_percent = tracked_rss_gb / rss_gb * 100;
     cout << dec << fixed << setprecision(3) << n_regions << "\t" << r75 << "\t" << r50 << "\t" << r25 << "\t";
-    cout << tracked_rss_gb << "GB\t" << rss_percent << "%\t" << largestRegions.size() << "\t";
+    cout << tracked_rss_gb << "GB\t" << rss_gb << "GB\t" << largestRegions.size() << "\t";
     cout << hex << largestRegions[0].address;
     for (size_t i = 1; i < largestRegions.size(); i++) {
         cout << "--" << largestRegions[i].address;
