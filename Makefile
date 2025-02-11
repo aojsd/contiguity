@@ -3,10 +3,7 @@ CC = gcc
 CXXFLAGS = -Wall -O3
 CFLAGS = -Wall -O3
 
-all: contiguity pagemap_dump
-
-contiguity: src/contiguity.cpp
-	$(CXX) $(CXXFLAGS) -o check_contiguity src/contiguity.cpp
+all: pagemap_dump
 
 pagemap_dump: src/pagemap_dump.c src/top_rss.cpp src/pmap_main.cpp src/pmap.h
 	$(CXX) $(CFLAGS) -o dump_pagemap src/pagemap_dump.c src/top_rss.cpp src/pmap_main.cpp

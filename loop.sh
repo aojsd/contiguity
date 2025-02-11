@@ -33,14 +33,23 @@ while true; do
     sleep 0.5
 done
 
-
-# Loop until the process with the given PID is no longer running
+# Found process
 echo "Monitoring contiguity of process $pid (name: $full_process_name)..." 1>&2
 DIR=/home/michael/ISCA_2025_results/contiguity/
+
+# Fields: Time, n_regions, r75, r50, r25, Tracked RSS, Total RSS, n_mappings, list_mappings
+echo "Time   regions r75 r50 r25 Tracked-RSS Total-RSS n_mappings list_mappings"
+
+# Loop until the process with the given PID is no longer running
 while ps -p $pid > /dev/null; do
     PTIME=$(ps -p $pid -o etime=)
-    CONTIG=$(pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid | $DIR/check_contiguity)
+    CONTIG=$(pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid)
     TIME=$(python3 $DIR/parse_time.py $PTIME)
+
+    # Check that CONTIG is not just whitespace or empty
+    if [[ -z "${CONTIG// }" ]]; then
+        break
+    fi
     echo "$TIME   $CONTIG"
     sleep 5
 done

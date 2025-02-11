@@ -68,9 +68,9 @@ else
     if [ "$NAME" == "empty" ]; then
         PIN_ARGS="${IOSLEEP} -stage1 0 ${@:7} ${DIST_FILE}"
     elif [ "$NAME" == "disk" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 400 ${@:7} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${@:7} ${DIST_FILE}"
     elif [ "$NAME" == "disk-skip" ]; then
-        PIN_ARGS="${IOSLEEP} -skip_time 120 -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 400 ${@:7} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -skip_time 120 -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${@:7} ${DIST_FILE}"
     elif [ "$NAME" == "struct" ]; then
         PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${@:7} ${DIST_FILE}"
     elif [ "$NAME" == "fields" ]; then
