@@ -176,6 +176,15 @@ int main(int argc, char **argv)
     }
 
     //==================================================================================================
+    // Get the base addresses of tracked virtual mappings in sorted order
+    //==================================================================================================
+    vector<u64> base_addrs;
+    for (auto r : largestRegions) {
+        base_addrs.push_back(stoul(r.address, nullptr, 16));
+    }
+    sort(base_addrs.begin(), base_addrs.end());
+
+    //==================================================================================================
     // Print results
     //==================================================================================================
     // Order:
@@ -191,9 +200,9 @@ int main(int argc, char **argv)
     double rss_gb = double(totalRSS) / 1024 / 1024 / 1024;
     cout << dec << fixed << setprecision(3) << n_regions << "\t" << r75 << "\t" << r50 << "\t" << r25 << "\t";
     cout << tracked_rss_gb << "GB\t" << rss_gb << "GB\t" << largestRegions.size() << "\t";
-    cout << hex << largestRegions[0].address;
-    for (size_t i = 1; i < largestRegions.size(); i++) {
-        cout << "--" << largestRegions[i].address;
+    cout << hex << base_addrs[0];
+    for (size_t i = 1; i < base_addrs.size(); i++) {
+        cout << "___" << base_addrs[i];
     }
     cout << endl;
 }
