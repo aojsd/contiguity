@@ -37,8 +37,8 @@ void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS) {
         rss <<= 10;
         totalRSS += rss;
 
-        // Track RW regions about certain RSS only (1MB)
-        if (permissions.compare("rw---") != 0 || rss < (1 << 20)) {
+        // Track RW regions about certain RSS only (10MB)
+        if (permissions.compare("rw---") != 0 || rss < (10 << 20)) {
             continue;
         }
         regions.emplace_back(address, size, rss);
