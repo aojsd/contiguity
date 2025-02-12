@@ -48,7 +48,7 @@ int main(int argc, char **argv)
     vector<tuple<uintptr_t, uintptr_t>> mappings;
     for (const auto &region : largestRegions) {
         for (size_t i = 0; i < region.size; i += pageSize) {
-            uintptr_t vaddr = stoul(region.address, nullptr, 16) + i;
+            uintptr_t vaddr = region.address + i;
             uintptr_t paddr;
             if (virt_to_phys_user(&paddr, pid, vaddr)) {
                 cerr << "Failed to convert virtual address to physical\n";
@@ -180,7 +180,7 @@ int main(int argc, char **argv)
     //==================================================================================================
     vector<u64> base_addrs;
     for (auto r : largestRegions) {
-        base_addrs.push_back(stoul(r.address, nullptr, 16));
+        base_addrs.push_back(r.address);
     }
     sort(base_addrs.begin(), base_addrs.end());
 

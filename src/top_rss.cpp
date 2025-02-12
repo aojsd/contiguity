@@ -16,22 +16,21 @@ void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS) {
     std::getline(std::cin, line);
     while (std::getline(std::cin, line)) {
         std::istringstream iss(line);
-        std::string address;
+        uint64_t address;
         size_t size, rss, dirty;
         std::string permissions;
         std::string mapping;
 
         // Skip malformed lines
-        if (!(iss >> address >> size >> rss >> dirty >> permissions >> mapping)) {
+        if (!(iss >> std::hex >> address >> std::dec >> size >> rss >> dirty >> permissions >> mapping)) {
             continue; 
         }
         // Skip memory not marked as RW, or containing certain strings in the mapping
-        else if (permissions.compare("rw---") == 0 ||
+        else if (permissions.compare("rw---") != 0 ||
                  mapping.find("pitracer") != std::string::npos ||
                  mapping.find("pin") != std::string::npos) {
             continue;
         }
-        
 
         // Size and RSS are in KB, convert to bytes
         size <<= 10;
@@ -39,7 +38,7 @@ void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS) {
         totalRSS += rss;
 
         // Track RW regions about certain RSS only (10MB)
-        if (permissions.compare("rw---") != 0 || rss < (10 << 20)) {
+        if (rss < (10 << 20)) {
             continue;
         }
         regions.emplace_back(address, size, rss);
