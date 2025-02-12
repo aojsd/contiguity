@@ -21,19 +21,21 @@ void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS) {
         std::string permissions;
         std::string mapping;
 
+        // Skip malformed lines
         if (!(iss >> address >> size >> rss >> dirty >> permissions >> mapping)) {
-            continue; // Skip malformed lines
-        }
-        else if (permissions.compare("rw---") != 0) {
-            continue; // Skip special regions
+            continue; 
         }
 
         // Size and RSS are in KB, convert to bytes
         size <<= 10;
         rss <<= 10;
-
-        regions.emplace_back(address, size, rss);
         totalRSS += rss;
+
+        // Track RW regions about certain RSS only (1MB)
+        if (permissions.compare("rw---") != 0 || rss < (1 << 20)) {
+            continue;
+        }
+        regions.emplace_back(address, size, rss);
     }
 }
 
