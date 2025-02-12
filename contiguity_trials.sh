@@ -1,9 +1,20 @@
 # Run trials of application using remote "run_pin.sh" script
-# Usage: ./pin_trials.sh <num_trials> <remote_host> <app> <output_dir> <pin_mode> <THP>
+# Usage: ./pin_trials.sh <num_trials> <remote_host> <app> <output_dir> <pin_mode> <Other>
 if [ "$#" -lt 5 ]; then
-    echo "Usage: ./pin_trials.sh <num_trials> <remote_host> <app> <output_dir> <pin_mode> <THP>"
+    echo "Usage: ./pin_trials.sh <num_trials> <remote_host> <app> <output_dir> <pin_mode> <Other>"
     exit 1
 fi
+
+# Ouput subdir: <output_dir>/<app>/<pin_mode>
+# OUTDIR=$4/$3/$5
+# mkdir -p $OUTDIR
+
+# Parse extra arguments
+eval "$(python3 bash_parser.py ${@:6})"
+echo "THP setting: ${THP}"
+echo "Dirty bytes setting: ${DIRTY}"
+echo "Dirty background bytes: ${DIRTY_BG}"
+echo "Extra Pin arguments ${PIN_EXTRA}"
 
 # Memcached sub-directories
 mkdir -p $4
@@ -66,25 +77,25 @@ else
     DIST_FILE="-record_file /home/michael/ISCA_2025_results/tmp/${APP}.dist"
     DIST_FILE="${IOSLEEP} ${DIST_FILE}"
     if [ "$NAME" == "empty" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 ${@:7} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -stage1 0 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "disk" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${@:7} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "disk-skip" ]; then
-        PIN_ARGS="${IOSLEEP} -skip_time 120 -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${@:7} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -skip_time 300 -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "struct" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${@:7} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "fields" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${@:7} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "fields-empty" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 3 ${@:7} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 3 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "fields-threads" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 12 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${@:7} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -stage1 12 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "split" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 4 -stage2 1 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${@:7} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 4 -stage2 1 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "split-empty" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 4 -stage2 1 ${@:7} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 4 -stage2 1 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "pfor" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 4 -stage2 1 -comp2 1 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${@:7} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 4 -stage2 1 -comp2 1 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
     else
         echo "Invalid Pin mode: $NAME"
         exit 1
@@ -102,9 +113,13 @@ ssh $2 "sudo reboot"
 sleep 90
 mkdir -p $4/$5
 
-# Turn on THP if specified
-if [ "$6" == "1" ]; then
+# System settings
+if [ "$THP" == "1" ]; then
     ssh $2 "sudo sh -c 'echo always > /sys/kernel/mm/transparent_hugepage/enabled'" > /dev/null
+fi
+if [ "$DIRTY" != "0" ]; then
+    ssh $2 "sudo sh -c 'echo $DIRTY > /proc/sys/vm/dirty_bytes'" > /dev/null
+    ssh $2 "sudo sh -c 'echo $DIRTY_BG > /proc/sys/vm/dirty_background_bytes'" > /dev/null
 fi
 
 # Disable swap
