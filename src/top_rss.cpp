@@ -25,12 +25,13 @@ void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS) {
         if (!(iss >> address >> size >> rss >> dirty >> permissions >> mapping)) {
             continue; 
         }
-        // Skip pin-memory marked as RWX, or containing certain strings in the mapping
-        else if (permissions.compare("rwx--") == 0 ||
+        // Skip memory not marked as RW, or containing certain strings in the mapping
+        else if (permissions.compare("rw---") == 0 ||
                  mapping.find("pitracer") != std::string::npos ||
                  mapping.find("pin") != std::string::npos) {
             continue;
         }
+        
 
         // Size and RSS are in KB, convert to bytes
         size <<= 10;
