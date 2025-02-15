@@ -10,11 +10,11 @@ fi
 # mkdir -p $OUTDIR
 
 # Parse extra arguments
-eval "$(python3 bash_parser.py ${@:6})"
+eval "$(python3 bash_parser.py "${@:6}")"
 echo "THP setting: ${THP}"
-echo "Dirty bytes setting: ${DIRTY}"
-echo "Dirty background bytes: ${DIRTY_BG}"
-echo "Extra Pin arguments ${PIN_EXTRA}"
+echo "Dirty bytes setting (pages): ${DIRTY}"
+echo "Dirty background bytes (pages): ${DIRTY_BG}"
+echo "Extra Pin arguments: ${PIN_EXTRA}"
 
 # Memcached sub-directories
 mkdir -p $4
