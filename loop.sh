@@ -42,16 +42,22 @@ echo "Time   regions r75 r50 r25 Tracked-RSS Total-RSS n_mappings list_mappings"
 
 # Loop until the process with the given PID is no longer running
 while ps -p $pid > /dev/null; do
+    sleep 5
     PTIME=$(ps -p $pid -o etime=)
-    CONTIG=$(pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid)
     TIME=$(python3 $DIR/parse_time.py $PTIME)
+    CONTIG=$(pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid)
+    RET=$?
 
     # Check that CONTIG is not just whitespace or empty
     if [[ -z "${CONTIG// }" ]]; then
+        # If SIGSEGV, then process just hasn't started
+        if [ $RET -eq 139 ]; then
+            echo "$TIME   0 0 0 0 0GB 0GB 0 0"
+        else
+            echo "$pid: $full_process_name has exited" 1>&2
         break
     fi
     echo "$TIME   $CONTIG"
-    sleep 5
 done
 
 echo "$pid: $full_process_name is no longer running, exiting" 1>&2
