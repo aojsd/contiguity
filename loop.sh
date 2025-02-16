@@ -41,8 +41,8 @@ DIR=/home/michael/ISCA_2025_results/contiguity/
 echo "Time   regions r75 r50 r25 Tracked-RSS Total-RSS n_mappings list_mappings"
 
 # Loop until the process with the given PID is no longer running
+sleep 5
 while ps -p $pid > /dev/null; do
-    sleep 5
     PTIME=$(ps -p $pid -o etime=)
     TIME=$(python3 $DIR/parse_time.py $PTIME)
     CONTIG=$(pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid)
@@ -59,6 +59,7 @@ while ps -p $pid > /dev/null; do
         fi
     fi
     echo "$TIME   $CONTIG"
+    sleep 5
 done
 
 echo "$pid: $full_process_name is no longer running, exiting" 1>&2
