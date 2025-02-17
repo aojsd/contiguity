@@ -57,8 +57,9 @@ while ps -p $pid > /dev/null; do
             echo "$pid: $full_process_name has exited" 1>&2
             break
         fi
+    else
+        echo "$TIME   $CONTIG"
     fi
-    echo "$TIME   $CONTIG"
     sleep 5
 done
 
