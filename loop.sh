@@ -45,7 +45,7 @@ sleep 5
 while ps -p $pid > /dev/null; do
     PTIME=$(ps -p $pid -o etime=)
     TIME=$(python3 $DIR/parse_time.py $PTIME)
-    CONTIG=$(pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid)
+    CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid)
     RET=$?
 
     # Check that CONTIG is not just whitespace or empty
