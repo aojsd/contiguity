@@ -1,7 +1,7 @@
 #!/bin/bash
 # Take process name, waits for a process containing this name has over 50% CPU usage
 if [ $# -ne 1 ]; then
-    echo "Usage: $0 <process_name>"
+    echo "Usage: $0 <process_name> [initial sleep]"
     exit 1
 fi
 
@@ -41,8 +41,14 @@ DIR=/home/michael/ISCA_2025_results/contiguity/
 echo "Time,Tracked-RSS,Total-RSS,n_mappings,64K,128K,256K,512K,1M,2M,4M,8M,16M,32M,64M,128M,256M,512M,1G"
 # echo "Time   regions r75 r50 r25 Tracked-RSS Total-RSS n_mappings list_mappings"
 
+# Initial sleep, default 5s
+if [ $# -eq 2 ]; then
+    sleep $2
+else
+    sleep 5
+fi
+
 # Loop until the process with the given PID is no longer running
-sleep 5
 while ps -p $pid > /dev/null; do
     PTIME=$(ps -p $pid -o etime=)
     TIME=$(python3 $DIR/parse_time.py $PTIME)
@@ -62,7 +68,7 @@ while ps -p $pid > /dev/null; do
     else
         echo "$TIME,$CONTIG"
     fi
-    sleep 5
+    sleep 30
 done
 
 echo "$pid: $full_process_name is no longer running, exiting" 1>&2

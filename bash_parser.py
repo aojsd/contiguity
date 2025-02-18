@@ -8,6 +8,7 @@ def main(args):
     parser.add_argument("--DIRTY", type=int, help="Dirty bytes setting (pages)", default=0)
     parser.add_argument("--CPU", type=int, help="CPU usage limit", default=0)
     parser.add_argument("--PIN", type=str, help="Extra PIN arguments", default="")
+    parser.add_argument("--LOOP_SLEEP", type=int, help="Sleep time for loop.sh", default=5)
     args = parser.parse_args(args)
 
     dirty_bytes = args.DIRTY << 12
@@ -16,6 +17,7 @@ def main(args):
     print(f"DIRTY_BG={dirty_bytes >> 1}")
     print(f"CPU_LIMIT={args.CPU}")
     print(f"PIN_EXTRA=\"{args.PIN}\"")
+    print(f"LOOP_SLEEP={args.LOOP_SLEEP}")
     return
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ echo "THP setting: ${THP}"
 echo "Dirty bytes setting (pages): ${DIRTY}"
 echo "Dirty background bytes (pages): ${DIRTY_BG}"
 echo "CPU usage limit: ${CPU_LIMIT}"
+echo "Loop initial sleep time: ${LOOP_SLEEP}"
 echo "Extra Pin arguments: ${PIN_EXTRA}"
 
 # Memcached sub-directories
@@ -136,6 +137,9 @@ if [ "$CPU_LIMIT" != "0" ]; then
     CG="sudo cgexec -g cpu:pin"
 fi
 
+# Always set swappiness to 0
+ssh $2 "sudo sh -c 'echo 0 > /proc/sys/vm/swappiness'"
+
 
 # Disable swap
 ssh $2 "sudo swapoff -a"
@@ -153,7 +157,7 @@ for i in $(seq 1 $1); do
     # For memcached, run YCSB on the local machine
     if [ "$3" == "memA" ] || [ "$3" == "memB" ] || [ "$3" == "memC" ] || [ "$3" == "memW" ] || [ "$3" == "memDY" ]; then
 	# Run memcached as a background process
-        ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh memcached > /home/michael/ISCA_2025_results/tmp/$5.txt" &
+        ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh memcached ${LOOP_SLEEP} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
         ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
 
         # Run from YCSB root directory
@@ -167,7 +171,7 @@ for i in $(seq 1 $1); do
         ssh $2 "sudo pkill -2 -f memcached"
         wait $(jobs -p)
     else
-        ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh $3 > /home/michael/ISCA_2025_results/tmp/$5.txt" &
+        ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh $3 ${LOOP_SLEEP} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
 
         # Execute the remote script, produces single output in ~/ISCA_2025_results/tmp/<app>.out
         ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}"

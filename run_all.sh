@@ -21,16 +21,13 @@ echo "Extra Pin arguments: ${PIN_EXTRA}"
 
 set -x
 ARG_ARRAY=(--THP ${THP} --DIRTY ${DIRTY} --CPU ${CPU_LIMIT} --PIN "${PIN_EXTRA}")
-EMPTY_ARG_ARRAY=(--THP ${THP} --DIRTY ${DIRTY} --PIN "${PIN_EXTRA}")
-
-# Empty
-# ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR/$APP empty "${EMPTY_ARG_ARRAY[@]}"
+EMPTY_ARG_ARRAY=(--THP ${THP} --PIN "${PIN_EXTRA}")
 
 # Disk
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR/$APP disk "${ARG_ARRAY[@]}"
 
 # Disk skip
-# ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR/$APP disk-skip "${ARG_ARRAY[@]}"
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR/$APP disk-skip "${ARG_ARRAY[@]}"
 
 # Fields
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR/$APP fields "${ARG_ARRAY[@]}"
