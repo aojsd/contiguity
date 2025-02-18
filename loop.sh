@@ -38,7 +38,8 @@ echo "Monitoring contiguity of process $pid (name: $full_process_name)..." 1>&2
 
 # Fields: Time, n_regions, r75, r50, r25, Tracked RSS, Total RSS, n_mappings, list_mappings
 DIR=/home/michael/ISCA_2025_results/contiguity/
-echo "Time   regions r75 r50 r25 Tracked-RSS Total-RSS n_mappings list_mappings"
+echo "Time,Tracked-RSS,Total-RSS,n_mappings,64K,128K,256K,512K,1M,2M,4M,8M,16M,32M,64M,128M,256M,512M,1G"
+# echo "Time   regions r75 r50 r25 Tracked-RSS Total-RSS n_mappings list_mappings"
 
 # Loop until the process with the given PID is no longer running
 sleep 5
@@ -52,13 +53,14 @@ while ps -p $pid > /dev/null; do
     if [[ -z "${CONTIG// }" ]]; then
         # If SIGSEGV, then process just hasn't started
         if [ $RET -eq 139 ]; then
-            echo "$TIME   0 0 0 0 0GB 0GB 0 0"
+            # echo "$TIME   0 0 0 0 0GB 0GB 0 0"
+            sleep 1
         else
             echo "$pid: $full_process_name has exited" 1>&2
             break
         fi
     else
-        echo "$TIME   $CONTIG"
+        echo "$TIME,$CONTIG"
     fi
     sleep 5
 done
