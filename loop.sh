@@ -1,6 +1,6 @@
 #!/bin/bash
 # Take process name, waits for a process containing this name has over 50% CPU usage
-if [ $# -ne 1 ]; then
+if [ $# -lt 1 ]; then
     echo "Usage: $0 <process_name> [initial sleep]"
     exit 1
 fi
