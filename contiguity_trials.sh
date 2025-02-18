@@ -14,6 +14,7 @@ eval "$(python3 bash_parser.py "${@:6}")"
 echo "THP setting: ${THP}"
 echo "Dirty bytes setting (pages): ${DIRTY}"
 echo "Dirty background bytes (pages): ${DIRTY_BG}"
+echo "CPU usage limit: ${CPU_LIMIT}"
 echo "Extra Pin arguments: ${PIN_EXTRA}"
 
 # Memcached sub-directories
@@ -76,7 +77,9 @@ if [ "$5" == "native" ]; then
 else
     DIST_FILE="-record_file /home/michael/ISCA_2025_results/tmp/${APP}.dist"
     DIST_FILE="${IOSLEEP} ${DIST_FILE}"
-    if [ "$NAME" == "empty" ]; then
+    if [ "$NAME" == "native" ]; then
+        PIN_ARGS=""
+    elif [ "$NAME" == "empty" ]; then
         PIN_ARGS="${IOSLEEP} -stage1 0 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "disk" ]; then
         PIN_ARGS="${IOSLEEP} -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
@@ -121,6 +124,18 @@ if [ "$DIRTY" != "0" ]; then
     ssh $2 "sudo sh -c 'echo $DIRTY > /proc/sys/vm/dirty_bytes'" > /dev/null
     ssh $2 "sudo sh -c 'echo $DIRTY_BG > /proc/sys/vm/dirty_background_bytes'" > /dev/null
 fi
+if [ "$CPU_LIMIT" != "0" ]; then
+    # Set MAX_CPU = (CPU_LIMIT / 100 * 100000)
+    MAX_CPU=$(echo "$CPU_LIMIT 100000" | awk '{print $1 * $2 / 100}')
+
+    # Make cgroup for pin
+    ssh $2 "sudo mkdir /sys/fs/cgroup/pin"
+    ssh $2 "echo "$MAX_CPU 100000" | sudo tee /sys/fs/cgroup/pin/cpu.max"
+
+    # Command to run pin in cgroup
+    CG="sudo cgexec -g cpu:pin"
+fi
+
 
 # Disable swap
 ssh $2 "sudo swapoff -a"
@@ -139,7 +154,7 @@ for i in $(seq 1 $1); do
     if [ "$3" == "memA" ] || [ "$3" == "memB" ] || [ "$3" == "memC" ] || [ "$3" == "memW" ] || [ "$3" == "memDY" ]; then
 	# Run memcached as a background process
         ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh memcached > /home/michael/ISCA_2025_results/tmp/$5.txt" &
-        ssh $2 "cd /home/michael/ISCA_2025_results; ./run_pin.sh ${APP} ${PIN_ARGS}" &
+        ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
 
         # Run from YCSB root directory
         DIR=$(pwd)
@@ -155,7 +170,7 @@ for i in $(seq 1 $1); do
         ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh $3 > /home/michael/ISCA_2025_results/tmp/$5.txt" &
 
         # Execute the remote script, produces single output in ~/ISCA_2025_results/tmp/<app>.out
-        ssh $2 "cd /home/michael/ISCA_2025_results; ./run_pin.sh ${APP} ${PIN_ARGS}"
+        ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}"
         wait $(jobs -p)
     fi
 

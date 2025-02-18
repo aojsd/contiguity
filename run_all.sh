@@ -5,25 +5,32 @@ if [ "$#" -lt 4 ]; then
     exit 1
 fi
 
-# Setup script to stop all background jobs on interrupt
-trap 'kill $(jobs -p)' SIGINT
-
 # Rename args
 TRIALS=$1
 HOST=$2
 APP=$3
 OUTDIR=$4
-EXTRA=$5
+
+# Parse extra arguments
+eval "$(python3 bash_parser.py "${@:5}")"
+echo "THP setting: ${THP}"
+echo "Dirty bytes setting (pages): ${DIRTY}"
+echo "Dirty background bytes (pages): ${DIRTY_BG}"
+echo "CPU usage limit: ${CPU_LIMIT}"
+echo "Extra Pin arguments: ${PIN_EXTRA}"
+
 set -x
+ARG_ARRAY=(--THP ${THP} --DIRTY ${DIRTY} --CPU ${CPU_LIMIT} --PIN "${PIN_EXTRA}")
+EMPTY_ARG_ARRAY=(--THP ${THP} --DIRTY ${DIRTY} --PIN "${PIN_EXTRA}")
 
 # Empty
-./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR/$APP empty $EXTRA
+# ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR/$APP empty "${EMPTY_ARG_ARRAY[@]}"
 
 # Disk
-./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR/$APP disk $EXTRA
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR/$APP disk "${ARG_ARRAY[@]}"
 
 # Disk skip
-./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR/$APP disk-skip $EXTRA
+# ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR/$APP disk-skip "${ARG_ARRAY[@]}"
 
 # Fields
-./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR/$APP fields $EXTRA
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR/$APP fields "${ARG_ARRAY[@]}"
