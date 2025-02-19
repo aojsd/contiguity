@@ -89,13 +89,7 @@ int main(int argc, char **argv)
                 // Get number of each power of 2 region
                 u64 start = last_PFN - region_size + 1;
                 u64 end = PFN + 1;
-
-                region_size >>= 4;
-                for (int i = 4; i < 19; i++) {
-                    if (region_size == 0) break;
-                    power2_regions[i - 4] += region_size;
-                    region_size >>= 1;
-                }
+                count_pow2(start, end, CONT_HIGHEST, power2_regions);
 
                 // Reset region
                 region_size = 0;
@@ -126,12 +120,15 @@ int main(int argc, char **argv)
                     total_pages += region_size;
 
                     // Get number of each power of 2 region
-                    region_size >>= 4;
-                    for (int i = 4; i < 19; i++) {
-                        if (region_size == 0) break;
-                        power2_regions[i - 4] += region_size;
-                        region_size >>= 1;
-                    }
+                    u64 start = last_PFN - region_size + 1;
+                    u64 end = PFN + 1;
+                    count_pow2(start, end, CONT_HIGHEST, power2_regions);
+                    // region_size >>= 4;
+                    // for (int i = 4; i < 19; i++) {
+                    //     if (region_size == 0) break;
+                    //     power2_regions[i - 4] += region_size;
+                    //     region_size >>= 1;
+                    // }
                 }
                 region_size = 1;
             }

@@ -10,12 +10,9 @@ using namespace std;
 // =================================================================================================
 void count_pow2(u64 start, u64 end, int pow_largest, u64* region_count) {
     // Return if pow_largest is less than the minimum we are considering
-    assert(start <= end);
-    if (pow_largest < CONT_LOWEST || start == end) return;
-
-    cout << "start: " << start << ", end: " << end << ", pow_largest: " << pow_largest << endl;
-
     u64 region_size = end - start;
+    assert(region_size >= 0);
+    if (pow_largest < CONT_LOWEST || region_size == 0) return;
 
     // Region too small, continue
     if (region_size < ((u64) 1 << pow_largest)) {
