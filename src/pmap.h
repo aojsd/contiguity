@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <numeric>
 
+#define u64 unsigned long long
+
 typedef struct {
     uint64_t pfn : 55;
     unsigned int soft_dirty : 1;
@@ -36,3 +38,8 @@ struct MemoryRegion {
 };
 void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS);
 std::vector<MemoryRegion> findLargestRegions(const std::vector<MemoryRegion> &regions, size_t totalRSS);
+
+
+#define CONT_LOWEST 2
+#define CONT_HIGHEST 18
+void count_pow2(u64 start, u64 end, int pow_largest, u64* region_count);

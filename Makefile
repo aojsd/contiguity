@@ -5,8 +5,11 @@ CFLAGS = -Wall -O3
 
 all: pagemap_dump
 
-pagemap_dump: src/pagemap_dump.c src/top_rss.cpp src/pmap_main.cpp src/pmap.h
+pagemap_dump: src/pagemap_dump.c src/top_rss.cpp src/pmap_main.cpp src/pow2_regions.cpp src/pmap.h
 	$(CXX) $(CFLAGS) -o dump_pagemap src/pagemap_dump.c src/top_rss.cpp src/pmap_main.cpp
 
+test: src/pow2_regions.cpp src/pmap.h src/test.cpp
+	$(CXX) $(CXXFLAGS) -o src/test src/pow2_regions.cpp src/test.cpp
+
 clean:
-	rm -f check_contiguity dump_pagemap
+	rm -f src/test dump_pagemap

@@ -6,8 +6,7 @@ if [ "$#" -lt 5 ]; then
 fi
 
 # Ouput subdir: <output_dir>/<app>/<pin_mode>
-# OUTDIR=$4/$3/$5
-# mkdir -p $OUTDIR
+OUTDIR=$4/$3/$5
 
 # Parse extra arguments
 eval "$(python3 bash_parser.py "${@:6}")"
@@ -17,9 +16,10 @@ echo "Dirty background bytes (pages): ${DIRTY_BG}"
 echo "CPU usage limit: ${CPU_LIMIT}"
 echo "Loop initial sleep time: ${LOOP_SLEEP}"
 echo "Extra Pin arguments: ${PIN_EXTRA}"
+echo "Output directory: ${OUTDIR}"
 
 # Memcached sub-directories
-mkdir -p $4
+mkdir -p $OUTDIR
 if [ "$3" == "memA" ] || [ "$3" == "memB" ] || [ "$3" == "memC" ] || [ "$3" == "memW" ] || [ "$3" == "memDY" ]; then
     # Select memcached workload
     if [ "$3" == "memA" ]; then
@@ -115,7 +115,7 @@ fi
 echo "Rebooting $2"
 ssh $2 "sudo reboot"
 sleep 90
-mkdir -p $4/$5
+mkdir -p $OUTDIR/$5
 
 # System settings
 if [ "$THP" == "1" ]; then
@@ -184,7 +184,7 @@ for i in $(seq 1 $1); do
     ssh $2 "mkdir -p /home/michael/ssd/scratch/${APP}_tmp/"
 
     # Copy the output to the local machine, renaming it to include the trial number
-    scp $2:/home/michael/ISCA_2025_results/tmp/$5.txt $4/$5/$5_$i.txt
+    scp $2:/home/michael/ISCA_2025_results/tmp/$5.txt $OUTDIR/$5_$i.txt
 done
 
 # Clean up temp directory

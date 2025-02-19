@@ -13,8 +13,6 @@
 
 using namespace std;
 
-#define u64 unsigned long long
-
 float coverage = 0.9;
 map<u64, int> region_sizes;
 vector<u64> region_starts_V;
@@ -61,8 +59,7 @@ int main(int argc, char **argv)
     //==================================================================================================
     // Extract region data
     //==================================================================================================
-    // Power of 2 region tracking starts at 64KB (2^4 pages) and ends at 1GB (2^18 pages)
-    u64 power2_regions[15] = {0};
+    u64 power2_regions[CONT_HIGHEST - CONT_LOWEST + 1] = {0};
     u64 n_regions = 0;
     u64 last_VPN = 0;
     u64 last_PFN = 0;
@@ -90,6 +87,9 @@ int main(int argc, char **argv)
                 total_pages += region_size;
 
                 // Get number of each power of 2 region
+                u64 start = last_PFN - region_size + 1;
+                u64 end = PFN + 1;
+
                 region_size >>= 4;
                 for (int i = 4; i < 19; i++) {
                     if (region_size == 0) break;
