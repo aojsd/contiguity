@@ -88,7 +88,7 @@ int main(int argc, char **argv)
 
                 // Get number of each power of 2 region
                 u64 start = last_PFN - region_size + 1;
-                u64 end = PFN + 1;
+                u64 end = last_PFN + 1;
                 count_pow2(start, end, CONT_HIGHEST, power2_regions);
 
                 // Reset region
@@ -121,7 +121,7 @@ int main(int argc, char **argv)
 
                     // Get number of each power of 2 region
                     u64 start = last_PFN - region_size + 1;
-                    u64 end = PFN + 1;
+                    u64 end = last_PFN + 1;
                     count_pow2(start, end, CONT_HIGHEST, power2_regions);
                     // region_size >>= 4;
                     // for (int i = 4; i < 19; i++) {
