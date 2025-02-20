@@ -149,15 +149,21 @@ ssh $2 "mkdir -p /home/michael/ssd/scratch/${APP}_tmp/"
 
 # Trials
 for i in $(seq 1 $1); do
-    echo "Trial $i"
+    echo "========================================================================================"
+    echo "${APP}: Trial $i"
+    echo "========================================================================================"
 
     # Drop caches
     ssh $2 "sudo /home/michael/ssd/drop_cache.sh"
 
     # For memcached, run YCSB on the local machine
     if [ "$3" == "memA" ] || [ "$3" == "memB" ] || [ "$3" == "memC" ] || [ "$3" == "memW" ] || [ "$3" == "memDY" ]; then
-	# Run memcached as a background process
-        ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh memcached ${LOOP_SLEEP} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
+        if [ "$3" == "memA" ]; then
+            REGIONS=25
+        fi
+
+        # Run memcached as a background process
+        ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh ${REGIONS} memcached ${LOOP_SLEEP} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
         ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
 
         # Run from YCSB root directory

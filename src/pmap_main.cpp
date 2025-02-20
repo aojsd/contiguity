@@ -9,6 +9,7 @@
 #include <tuple>
 #include <fstream>
 #include <cstdint>
+#include <cassert>
 #include "pmap.h"
 
 using namespace std;
@@ -27,17 +28,22 @@ vector<u64> region_starts_P;
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        cerr << "Usage: sudo "<< argv[0] << " <pid>\n";
+        cerr << "Usage: sudo "<< argv[0] << " <pid> [max_regions]\n";
         return EXIT_FAILURE;
     }
 
-    // return parse_all(argc, argv);
+    // If max regions is specified, use it instead of coverage
+    int max_regions = INT32_MAX;
+    if (argc == 3) {
+        coverage = 1;
+        max_regions = stoi(argv[2]);
+    }
 
     // Find regions
     vector<MemoryRegion> regions;
     size_t totalRSS;
     parsePmapOutput(regions, totalRSS);
-    vector<MemoryRegion> largestRegions = findLargestRegions(regions, totalRSS);
+    vector<MemoryRegion> largestRegions = findLargestRegions(regions, totalRSS, coverage, max_regions);
     // cerr << "Regions (" << coverage * 100 << "% RSS):\t" << largestRegions.size() << endl;
 
     // Get mappings

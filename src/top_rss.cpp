@@ -45,7 +45,7 @@ void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS) {
     }
 }
 
-std::vector<MemoryRegion> findLargestRegions(const std::vector<MemoryRegion> &regions, size_t totalRSS) {
+std::vector<MemoryRegion> findLargestRegions(const std::vector<MemoryRegion> &regions, size_t totalRSS, float coverage, int max_regions) {
     std::vector<MemoryRegion> sortedRegions = regions;
     std::sort(sortedRegions.begin(), sortedRegions.end(), [](const MemoryRegion &a, const MemoryRegion &b) {
         return a.rss > b.rss; // Sort in descending order of RSS
@@ -57,8 +57,8 @@ std::vector<MemoryRegion> findLargestRegions(const std::vector<MemoryRegion> &re
     for (const auto &region : sortedRegions) {
         result.push_back(region);
         cumulativeRSS += region.rss;
-        if (cumulativeRSS >= totalRSS * coverage) {
-            break; // Stop once we reach 90% of the total RSS
+        if (cumulativeRSS >= totalRSS * coverage || result.size() >= max_regions) {
+            break; // Stop once we reach 90% of the total RSS or the maximum number of regions
         }
     }
 
