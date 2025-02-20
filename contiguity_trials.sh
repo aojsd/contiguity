@@ -81,7 +81,7 @@ else
     if [ "$NAME" == "native" ]; then
         PIN_ARGS=""
     elif [ "$NAME" == "empty" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -stage1 0 -bpages 16 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "disk" ]; then
         PIN_ARGS="${IOSLEEP} -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "disk-skip" ]; then
@@ -115,7 +115,7 @@ fi
 echo "Rebooting $2"
 ssh $2 "sudo reboot"
 sleep 90
-mkdir -p $OUTDIR/$5
+
 
 # System settings
 if [ "$THP" == "1" ]; then
