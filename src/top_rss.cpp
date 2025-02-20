@@ -45,7 +45,7 @@ void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS) {
     }
 }
 
-std::vector<MemoryRegion> findLargestRegions(const std::vector<MemoryRegion> &regions, size_t totalRSS, float coverage, int max_regions) {
+std::vector<MemoryRegion> findLargestRegions(const std::vector<MemoryRegion> &regions, size_t totalRSS, float coverage, u64 max_regions) {
     std::vector<MemoryRegion> sortedRegions = regions;
     std::sort(sortedRegions.begin(), sortedRegions.end(), [](const MemoryRegion &a, const MemoryRegion &b) {
         return a.rss > b.rss; // Sort in descending order of RSS
