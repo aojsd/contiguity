@@ -1,7 +1,7 @@
 #!/bin/bash
 # Take process name, waits for a process containing this name has over 50% CPU usage
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 <process_name> [initial sleep]"
+    echo "Usage: $0 <process_name> [max_regions]"
     exit 1
 fi
 
@@ -41,17 +41,13 @@ DIR=/home/michael/ISCA_2025_results/contiguity/
 echo "Time,Tracked-RSS,Total-RSS,n_mappings,16K,32K,64K,128K,256K,512K,1M,2M,4M,8M,16M,32M,64M,128M,256M,512M,1G"
 
 # Initial sleep, default 5s
-if [ $# -eq 2 ]; then
-    sleep $2
-else
-    sleep 5
-fi
+sleep 5
 
 # Loop until the process with the given PID is no longer running
 while ps -p $pid > /dev/null; do
     PTIME=$(ps -p $pid -o etime=)
     TIME=$(python3 $DIR/parse_time.py $PTIME)
-    CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid)
+    CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid $2)
     RET=$?
 
     # Check that CONTIG is not just whitespace or empty
