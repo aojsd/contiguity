@@ -39,6 +39,6 @@ void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS);
 std::vector<MemoryRegion> findLargestRegions(const std::vector<MemoryRegion> &regions, size_t totalRSS, float coverage, u64 max_regions);
 
 
-#define CONT_LOWEST 2
+#define CONT_LOWEST 0
 #define CONT_HIGHEST 18
 void count_pow2(u64 start, u64 end, int pow_largest, u64* region_count);

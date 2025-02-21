@@ -83,9 +83,9 @@ else
     elif [ "$NAME" == "empty" ]; then
         PIN_ARGS="${IOSLEEP} -stage1 0 -bpages 16 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "disk" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -stage1 0 -bpages 16 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "disk-skip" ]; then
-        PIN_ARGS="${IOSLEEP} -skip_time 300 -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="${IOSLEEP} -skip_time 300 -bpages 16 -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "struct" ]; then
         PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "fields" ]; then
@@ -114,7 +114,7 @@ fi
 # Reboot only once to capture how contiguity changes with each trial
 echo "Rebooting $2"
 ssh $2 "sudo reboot"
-sleep 90
+sleep 60
 
 
 # System settings
@@ -150,7 +150,7 @@ ssh $2 "mkdir -p /home/michael/ssd/scratch/${APP}_tmp/"
 # Trials
 for i in $(seq 1 $1); do
     echo "========================================================================================"
-    echo "${APP}: Trial $i"
+    echo "$3: Trial $i"
     echo "========================================================================================"
 
     # Drop caches
@@ -158,12 +158,10 @@ for i in $(seq 1 $1); do
 
     # For memcached, run YCSB on the local machine
     if [ "$3" == "memA" ] || [ "$3" == "memB" ] || [ "$3" == "memC" ] || [ "$3" == "memW" ] || [ "$3" == "memDY" ]; then
-        if [ "$3" == "memA" ]; then
-            REGIONS=25
-        fi
+        REGIONS=100
 
         # Run memcached as a background process
-        ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh ${REGIONS} memcached ${LOOP_SLEEP} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
+        ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh memcached ${REGIONS} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
         ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
 
         # Run from YCSB root directory
@@ -177,7 +175,7 @@ for i in $(seq 1 $1); do
         ssh $2 "sudo pkill -2 -f memcached"
         wait $(jobs -p)
     else
-        ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh $3 ${LOOP_SLEEP} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
+        ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh $3 > /home/michael/ISCA_2025_results/tmp/$5.txt" &
 
         # Execute the remote script, produces single output in ~/ISCA_2025_results/tmp/<app>.out
         ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}"

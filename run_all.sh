@@ -27,7 +27,7 @@ EMPTY_ARG_ARRAY=(--THP ${THP} --PIN "${PIN_EXTRA}")
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk "${ARG_ARRAY[@]}"
 
 # Disk skip
-./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk-skip "${ARG_ARRAY[@]}"
+# ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk-skip "${ARG_ARRAY[@]}"
 
 # Fields
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR fields "${ARG_ARRAY[@]}"
