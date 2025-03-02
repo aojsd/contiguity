@@ -7,7 +7,7 @@ fi
 
 # Name to match
 process_name="$1"
-cpu_threshold=50.0  # Define the minimum CPU usage percentage
+cpu_threshold=25.0  # Define the minimum CPU usage percentage
 
 echo "Waiting for a process named '$process_name' with CPU usage over $cpu_threshold%..." 1>&2
 
