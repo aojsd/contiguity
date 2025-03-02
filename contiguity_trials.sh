@@ -186,6 +186,7 @@ for i in $(seq 1 $1); do
 
         # Get khugepaged runtime using perf
         ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep khugepaged) -a &> /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt" &
+        ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep kcompactd) -a &> /home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt" &
 
         # Run from YCSB root directory
         DIR=$(pwd)
@@ -200,14 +201,21 @@ for i in $(seq 1 $1); do
         # End the khugepaged perf process
         ssh $2 "sudo pkill -2 -f perf"
         wait $(jobs -p)
+
+        # Get THP stats from /proc/vmstat
+        ssh $2 "grep -e 'thp' -e 'compact' /proc/vmstat" > $THP_DIR/vmstat_${APP}_$i.txt
     else
         ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh $3 > /home/michael/ISCA_2025_results/tmp/$5.txt" &
 
         # Execute the remote script, produces single output in ~/ISCA_2025_results/tmp/<app>.out
         ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep khugepaged) -a &> /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt" &
+        ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep kcompactd) -a &> /home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt" &
         ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}"
         ssh $2 "sudo pkill -2 -f perf"
         wait $(jobs -p)
+
+        # Get THP stats from /proc/vmstat
+        ssh $2 "grep -e 'thp' -e 'compact' /proc/vmstat" > $THP_DIR/vmstat_${APP}_$i.txt
     fi
 
     # Print size of trace directory
@@ -219,6 +227,8 @@ for i in $(seq 1 $1); do
     scp $2:/home/michael/ISCA_2025_results/tmp/$5.txt $OUTDIR/$5_$i.txt
     scp $2:/home/michael/ISCA_2025_results/tmp/${APP}.out $APP_OUT_DIR/${APP}_$i.out
     scp $2:/home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt $THP_DIR/khugepaged_${APP}_$i.txt
+    scp $2:/home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt $THP_DIR/kcompactd_${APP}_$i.txt
+    scp $2:/home/michael/ISCA_2025_results/tmp/${APP}_$i.perf $APP_OUT_DIR/${APP}_$i.perf
     if [ "${DIST_FILE}" == "" ]; then
         scp $2:/home/michael/ISCA_2025_results/tmp/${APP}.dist $DIST_OUT_DIR/dist_$3_$i.txt
         ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${APP}.dist"
@@ -226,6 +236,8 @@ for i in $(seq 1 $1); do
     ssh $2 "rm /home/michael/ISCA_2025_results/tmp/$5.txt"
     ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${APP}.out"
     ssh $2 "rm /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt"
+    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt"
+    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${APP}_$i.perf"
 done
 
 # Clean up temp directory
