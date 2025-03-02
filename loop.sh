@@ -35,7 +35,7 @@ done
 
 # Found process
 echo "Monitoring contiguity of process $pid (name: $full_process_name)..." 1>&2
-sudo perf stat -e task-clock,cycles -p ${pid} -a &> /home/michael/ISCA_2025_results/tmp/${process_name}_$i.perf &
+sudo perf stat -e task-clock,cycles -p ${pid} -a &> /home/michael/ISCA_2025_results/tmp/${process_name}.perf &
 
 # Fields: Time, n_regions, r75, r50, r25, Tracked RSS, Total RSS, n_mappings, list_mappings
 DIR=/home/michael/ISCA_2025_results/contiguity/

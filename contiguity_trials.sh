@@ -228,7 +228,7 @@ for i in $(seq 1 $1); do
     scp $2:/home/michael/ISCA_2025_results/tmp/${APP}.out $APP_OUT_DIR/${APP}_$i.out
     scp $2:/home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt $THP_DIR/khugepaged_${APP}_$i.txt
     scp $2:/home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt $THP_DIR/kcompactd_${APP}_$i.txt
-    scp $2:/home/michael/ISCA_2025_results/tmp/${APP}_$i.perf $APP_OUT_DIR/${APP}_$i.perf
+    scp $2:/home/michael/ISCA_2025_results/tmp/${APP}_$i.perf $APP_OUT_DIR/${APP}.perf
     if [ "${DIST_FILE}" == "" ]; then
         scp $2:/home/michael/ISCA_2025_results/tmp/${APP}.dist $DIST_OUT_DIR/dist_$3_$i.txt
         ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${APP}.dist"
