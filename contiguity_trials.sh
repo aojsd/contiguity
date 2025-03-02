@@ -7,16 +7,32 @@ fi
 
 # Ouput subdir: <output_dir>/<app>/<pin_mode>
 OUTDIR=$4/$3/$5
+APP_OUT_DIR=$OUTDIR/app
+DIST_OUT_DIR=$OUTDIR/dist
+THP_DIR=$OUTDIR/thp
+mkdir -p $APP_OUT_DIR
+mkdir -p $DIST_OUT_DIR
+mkdir -p $THP_DIR
 
 # Parse extra arguments
 eval "$(python3 bash_parser.py "${@:6}")"
 echo "THP setting: ${THP}"
+echo "THP pages per scan: ${THP_SCAN}"
+echo "THP sleep timer: ${THP_SLEEP}"
 echo "Dirty bytes setting (pages): ${DIRTY}"
 echo "Dirty background bytes (pages): ${DIRTY_BG}"
 echo "CPU usage limit: ${CPU_LIMIT}"
 echo "Loop initial sleep time: ${LOOP_SLEEP}"
 echo "Extra Pin arguments: ${PIN_EXTRA}"
 echo "Output directory: ${OUTDIR}"
+
+# if $DIST == 1
+if [ "$DIST" == "1" ]; then
+    echo "Collecting access distribution"
+    DIST_FILE="-record_file /home/michael/ISCA_2025_results/tmp/${APP}.dist"
+else
+    DIST_FILE=""
+fi
 
 # Memcached sub-directories
 mkdir -p $OUTDIR
@@ -76,30 +92,29 @@ PIN_ARGS=""
 if [ "$5" == "native" ]; then
     DIST_FILE=""
 else
-    DIST_FILE="-record_file /home/michael/ISCA_2025_results/tmp/${APP}.dist"
     DIST_FILE="${IOSLEEP} ${DIST_FILE}"
     if [ "$NAME" == "native" ]; then
         PIN_ARGS=""
     elif [ "$NAME" == "empty" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -bpages 16 ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="-stage1 0 -bpages 16 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "disk" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -bpages 16 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
-    elif [ "$NAME" == "disk-skip" ]; then
-        PIN_ARGS="${IOSLEEP} -skip_time 300 -bpages 16 -stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="-stage1 0 -bpages 16 -index_limit 200000 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
+    elif [ "$NAME" == "disk-largebuf" ]; then
+        PIN_ARGS="-stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "struct" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="-stage1 0 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "fields" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="-stage1 0 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "fields-empty" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 3 ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="-stage1 0 -comp1 3 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "fields-threads" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 12 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="-stage1 12 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "split" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 4 -stage2 1 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="-stage1 0 -comp1 4 -stage2 1 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "split-empty" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 4 -stage2 1 ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="-stage1 0 -comp1 4 -stage2 1 ${PIN_EXTRA} ${DIST_FILE}"
     elif [ "$NAME" == "pfor" ]; then
-        PIN_ARGS="${IOSLEEP} -stage1 0 -comp1 4 -stage2 1 -comp2 1 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="-stage1 0 -comp1 4 -stage2 1 -comp2 1 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
     else
         echo "Invalid Pin mode: $NAME"
         exit 1
@@ -119,7 +134,10 @@ sleep 60
 
 # System settings
 if [ "$THP" == "1" ]; then
-    ssh $2 "sudo sh -c 'echo always > /sys/kernel/mm/transparent_hugepage/enabled'" > /dev/null
+    THP_KERNEL_DIR="/sys/kernel/mm/transparent_hugepage"
+    ssh $2 "sudo sh -c 'echo always > $THP_KERNEL_DIR/enabled'" > /dev/null
+    ssh $2 "sudo sh -c 'echo $THP_SCAN > $THP_KERNEL_DIR/khugepaged/pages_to_scan'" > /dev/null
+    ssh $2 "sudo sh -c 'echo $THP_SLEEP > $THP_KERNEL_DIR/khugepaged/scan_sleep_millisecs'" > /dev/null
 fi
 if [ "$DIRTY" != "0" ]; then
     ssh $2 "sudo sh -c 'echo $DIRTY > /proc/sys/vm/dirty_bytes'" > /dev/null
@@ -140,9 +158,11 @@ fi
 # Always set swappiness to 0
 ssh $2 "sudo sh -c 'echo 0 > /proc/sys/vm/swappiness'"
 
-
 # Disable swap
 ssh $2 "sudo swapoff -a"
+
+# Always disable hyperthreading
+ssh $2 "sudo sh -c 'echo off > /sys/devices/system/cpu/smt/control'"
 
 # Create temp directory for trace files
 ssh $2 "mkdir -p /home/michael/ssd/scratch/${APP}_tmp/"
@@ -164,6 +184,9 @@ for i in $(seq 1 $1); do
         ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh memcached ${REGIONS} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
         ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
 
+        # Get khugepaged runtime using perf
+        ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep khugepaged) -a &> /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt" &
+
         # Run from YCSB root directory
         DIR=$(pwd)
         cd $YCSB_ROOT
@@ -173,12 +196,17 @@ for i in $(seq 1 $1); do
 
         # End the memcached server
         ssh $2 "sudo pkill -2 -f memcached"
+
+        # End the khugepaged perf process
+        ssh $2 "sudo pkill -2 -f perf"
         wait $(jobs -p)
     else
         ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh $3 > /home/michael/ISCA_2025_results/tmp/$5.txt" &
 
         # Execute the remote script, produces single output in ~/ISCA_2025_results/tmp/<app>.out
+        ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep khugepaged) -a &> /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt" &
         ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}"
+        ssh $2 "sudo pkill -2 -f perf"
         wait $(jobs -p)
     fi
 
@@ -189,6 +217,15 @@ for i in $(seq 1 $1); do
 
     # Copy the output to the local machine, renaming it to include the trial number
     scp $2:/home/michael/ISCA_2025_results/tmp/$5.txt $OUTDIR/$5_$i.txt
+    scp $2:/home/michael/ISCA_2025_results/tmp/${APP}.out $APP_OUT_DIR/${APP}_$i.out
+    scp $2:/home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt $THP_DIR/khugepaged_${APP}_$i.txt
+    if [ "${DIST_FILE}" == "" ]; then
+        scp $2:/home/michael/ISCA_2025_results/tmp/${APP}.dist $DIST_OUT_DIR/dist_$3_$i.txt
+        ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${APP}.dist"
+    fi
+    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/$5.txt"
+    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${APP}.out"
+    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt"
 done
 
 # Clean up temp directory
