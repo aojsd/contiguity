@@ -23,11 +23,11 @@ set -x
 ARG_ARRAY=(--THP ${THP} --DIRTY ${DIRTY} --CPU ${CPU_LIMIT} --PIN "${PIN_EXTRA}")
 EMPTY_ARG_ARRAY=(--THP ${THP} --PIN "${PIN_EXTRA}")
 
+# Fields
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR fields "${ARG_ARRAY[@]}"
+
 # Disk
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk "${ARG_ARRAY[@]}"
 
 # Disk skip
-# ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk-skip "${ARG_ARRAY[@]}"
-
-# Fields
-./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR fields "${ARG_ARRAY[@]}"
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk-largebuf "${ARG_ARRAY[@]}"
