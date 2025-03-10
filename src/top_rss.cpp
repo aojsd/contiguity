@@ -5,12 +5,17 @@
 #include <string>
 #include <algorithm>
 #include <numeric>
+#include <cassert>
 
 #include "pmap.h"
 
 void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS) {
     std::string line;
     totalRSS = 0;
+
+    // Pin will map shared memory regions into a separate rw--- region right after the shared mapping
+    // we need to ignore these regions
+    bool skip_shared_mem = false;
 
     // Skip the first header line
     std::getline(std::cin, line);
@@ -25,12 +30,27 @@ void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS) {
         if (!(iss >> std::hex >> address >> std::dec >> size >> rss >> dirty >> permissions >> mapping)) {
             continue; 
         }
+
+        // Skip the shared memory regions
+        if (skip_shared_mem) {
+            assert(permissions.compare("rw---") == 0);
+            skip_shared_mem = false;
+            continue;
+        }
+
+        // Check for shared memory label
+        if (mapping.find("shared_mem") != std::string::npos) {
+            skip_shared_mem = true;
+            continue;
+        }
+
         // Skip memory not marked as RW, or containing certain strings in the mapping
-        else if (permissions.compare("rw---") != 0 ||
+        if (permissions.compare("rw---") != 0 ||
                  mapping.find("pitracer") != std::string::npos ||
                  mapping.find("pin") != std::string::npos) {
             continue;
         }
+        
 
         // Size and RSS are in KB, convert to bytes
         size <<= 10;
