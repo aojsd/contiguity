@@ -36,6 +36,9 @@ echo "Loop initial sleep time: ${LOOP_SLEEP}"
 echo "Extra Pin arguments: ${PIN_EXTRA}"
 echo "Output directory: ${OUTDIR}"
 
+# Randomize the free list (or not)
+ssh $2 "ISCA_2025_results/contiguity/random_freelist.sh $RANDOM_FREELIST"
+
 # if $DIST == 1
 if [ "$DIST" == "1" ]; then
     echo "Collecting access distribution"
