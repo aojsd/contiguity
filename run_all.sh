@@ -1,7 +1,7 @@
 # Run trials of all configurations of an application using remote "run_pin.sh" script
-# Usage: ./run_all.sh <num_trials> <remote host> <output_dir> <THP>
+# Usage: ./run_all.sh <num_trials> <remote host> <output_dir> <other>
 if [ "$#" -lt 4 ]; then
-    echo "Usage: ./pin_trials.sh <num_trials> <remote host> <app> <output_dir> <Other>"
+    echo "Usage: ./run_all.sh <num_trials> <remote host> <app> <output_dir> <Other>"
     exit 1
 fi
 
