@@ -20,16 +20,19 @@ if [ "$1" -eq 1 ]; then
 
     # Default parameters
     if [ "$#" -eq 1 ]; then
-        sudo insmod kern_module/alloc_pages_randomize.ko
+        sudo insmod kern-module/alloc_pages_randomize.ko
+        sudo dmesg | tail -n 2
     
     # Custom parameters
     else
-        sudo insmod kern_module/alloc_pages_randomize.ko total_gb=$2 immovable_pct=$3
+        sudo insmod kern-module/alloc_pages_randomize.ko total_gb=$2 immovable_pct=$3
+        sudo dmesg | tail -n 2
     fi
 fi
 
 # Remove
 if [ "$1" -eq 0 ]; then
     sudo rmmod alloc_pages_randomize
+    sudo dmesg | tail -n 1
 fi
 
