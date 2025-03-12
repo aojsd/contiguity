@@ -11,6 +11,8 @@ def main(args):
     parser.add_argument("--CPU", type=int, help="CPU usage limit", default=0)
     parser.add_argument("--PIN", type=str, help="Extra PIN arguments", default="")
     parser.add_argument("--LOOP_SLEEP", type=int, help="Sleep time for loop.sh", default=5)
+    parser.add_argument("--ZERO_COMPACT", action="store_true", help="Set compaction proactiveness to 0", default=False)
+    parser.add_argument("--NO_COMPACT", action="store_true", help="Disable memory compaction", default=False)
     parser.add_argument("--DIST", action="store_true", help="Collect access distribution", default=False)
     args = parser.parse_args(args)
 
@@ -23,6 +25,8 @@ def main(args):
     print(f"CPU_LIMIT={args.CPU}")
     print(f"PIN_EXTRA=\"{args.PIN}\"")
     print(f"LOOP_SLEEP={args.LOOP_SLEEP}")
+    print(f"ZERO_COMPACT={int(args.ZERO_COMPACT)}")
+    print(f"NO_COMPACT={int(args.NO_COMPACT)}")
     print(f"DIST={int(args.DIST)}")
     return
 
