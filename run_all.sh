@@ -14,20 +14,28 @@ OUTDIR=$4
 # Parse extra arguments
 eval "$(python3 bash_parser.py "${@:5}")"
 echo "THP setting: ${THP}"
-echo "Dirty bytes setting (pages): ${DIRTY}"
-echo "Dirty background bytes (pages): ${DIRTY_BG}"
+echo "Dirty bytes setting (bytes): ${DIRTY}"
+echo "Dirty background bytes (bytes): ${DIRTY_BG}"
 echo "CPU usage limit: ${CPU_LIMIT}"
 echo "Extra Pin arguments: ${PIN_EXTRA}"
 
 set -x
-ARG_ARRAY=(--THP ${THP} --DIRTY ${DIRTY} --CPU ${CPU_LIMIT} --PIN "${PIN_EXTRA}")
-EMPTY_ARG_ARRAY=(--THP ${THP} --PIN "${PIN_EXTRA}")
+ARG_ARRAY=(${@:5})
+
+# Native
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR native "${ARG_ARRAY[@]}"
+
+# Empty
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR empty "${ARG_ARRAY[@]}"
 
 # Fields
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR fields "${ARG_ARRAY[@]}"
 
+# Disk no-cache
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk-nocache "${ARG_ARRAY[@]}"
+
 # Disk
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk "${ARG_ARRAY[@]}"
 
-# Disk skip
+# Disk large buffer
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk-largebuf "${ARG_ARRAY[@]}"

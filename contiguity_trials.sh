@@ -5,8 +5,12 @@ if [ "$#" -lt 5 ]; then
     exit 1
 fi
 
+# Empty the remote scratch directory
+ssh $2 "rm -rf /home/michael/ssd/scratch/*"
+
 # Ouput subdir: <output_dir>/<app>/<pin_mode>
-OUTDIR=$4/$3/$5
+CURR_DIR=$(pwd)
+OUTDIR=$CURR_DIR/$4/$3/$5
 APP_OUT_DIR=$OUTDIR/app
 DIST_OUT_DIR=$OUTDIR/dist
 THP_DIR=$OUTDIR/thp
@@ -19,8 +23,14 @@ eval "$(python3 bash_parser.py "${@:6}")"
 echo "THP setting: ${THP}"
 echo "THP pages per scan: ${THP_SCAN}"
 echo "THP sleep timer: ${THP_SLEEP}"
-echo "Dirty bytes setting (pages): ${DIRTY}"
-echo "Dirty background bytes (pages): ${DIRTY_BG}"
+if [ "$ZERO_COMPACT" == "1" ]; then
+    echo "Compaction Proactiveness: 0"
+fi
+if [ "$NO_COMPACT" == "1" ]; then
+    echo "Memory Compaction: Disabled"
+fi
+echo "Dirty bytes setting (bytes): ${DIRTY}"
+echo "Dirty background bytes (bytes): ${DIRTY_BG}"
 echo "CPU usage limit: ${CPU_LIMIT}"
 echo "Loop initial sleep time: ${LOOP_SLEEP}"
 echo "Extra Pin arguments: ${PIN_EXTRA}"
@@ -34,30 +44,40 @@ else
     DIST_FILE=""
 fi
 
+# If the app has a suffix "-XT", set THREADS to X (e.g, "-12T" sets THREADS=12)
+#  - Also retrieve the prefix before -XT
+if [[ $3 =~ ^(.+)-([0-9]+)T$ ]]; then
+    NAME="${BASH_REMATCH[1]}"
+    THREADS="${BASH_REMATCH[2]}"
+else
+    NAME=$3
+fi
+
 # Memcached sub-directories
 mkdir -p $OUTDIR
-if [ "$3" == "memA" ] || [ "$3" == "memB" ] || [ "$3" == "memC" ] || [ "$3" == "memW" ] || [ "$3" == "memDY" ]; then
+if [[ $3 == mem* ]]; then
     # Select memcached workload
-    if [ "$3" == "memA" ]; then
+    if [[ "$3" == memA* ]]; then
         WORKLOAD="workloada"
-        MEM="memcached"
-    elif [ "$3" == "memB" ]; then
+    elif [[ "$3" == memB* ]]; then
         WORKLOAD="workloadb"
-        MEM="memcached"
-    elif [ "$3" == "memC" ]; then
+    elif [[ "$3" == memC* ]]; then
         WORKLOAD="workloadc"
-        MEM="memcached"
-    elif [ "$3" == "memW" ]; then
+    elif [[ "$3" == memW* ]]; then
         WORKLOAD="workloadw"
-        MEM="memcached"
-    elif [ "$3" == "memDY" ]; then
+    elif [[ "$3" == memDY* ]]; then
         WORKLOAD="workload_dynamic"
-        MEM="memcached"
     else
         echo "Invalid memcached workload: $3"
         exit 1
     fi
-    APP="memcached"
+    # if threads is not blank, add suffix to app name, otherwise do not add the suffix
+    if [ -z "$THREADS" ]; then
+        APP="memcached"
+    else
+        APP="memcached-${THREADS}T"
+    fi
+    NAME="memcached"
 else
     APP=$3
 fi
@@ -65,7 +85,7 @@ fi
 # YCSB commands
 TARGET_IP=$(ssh -G $2 | awk '/^hostname/ { print $2 }')
 YCSB_ROOT=/home/michael/software/YCSB
-YCSB_HOST_ARGS="-p memcached.hosts=${TARGET_IP} -p memcached.port=11211 -p memcached.opTimeoutMillis=100000"
+YCSB_HOST_ARGS="-p memcached.hosts=${TARGET_IP} -p memcached.port=11211 -p memcached.opTimeoutMillis=1000000"
 YCSB_ARGS="-s -threads 12 -p hdrhistogram.percentiles=90,99,99.9,99.99 ${YCSB_HOST_ARGS}"
 YCSB_LOAD="python2 ${YCSB_ROOT}/bin/ycsb load memcached -P ${YCSB_ROOT}/workloads/${WORKLOAD} ${YCSB_ARGS}"
 YCSB_RUN="python2 ${YCSB_ROOT}/bin/ycsb run memcached -P ${YCSB_ROOT}/workloads/${WORKLOAD} ${YCSB_ARGS}"
@@ -79,46 +99,28 @@ ssh $2 "chmod +x /home/michael/ISCA_2025_results/run_pin.sh"
 # Select Pin mode
 # ==========================================================================================================
 # Check for IO-sleep mode
-if [[ $5 =~ ^([a-zA-Z]+)-([0-9]+)$ ]]; then
-    NAME="${BASH_REMATCH[1]}"
-    IOSLEEP="${BASH_REMATCH[2]}"
-    IOSLEEP="-iosleep $IOSLEEP"
-else
-    NAME=$5
-    IOSLEEP=""
-fi
-
 PIN_ARGS=""
+OUTPREFIX="/home/michael/ssd/scratch/${APP}_tmp/${APP}"
+OUTP_DIR="/home/michael/ssd/scratch/${APP}_tmp"
 if [ "$5" == "native" ]; then
-    DIST_FILE=""
+    PIN_ARGS=""
+elif [ "$5" == "empty" ]; then
+    PIN_ARGS="-stage1 0 -bpages 16 ${PIN_EXTRA} ${DIST_FILE}"
+elif [ "$5" == "disk" ]; then
+    PIN_ARGS="-stage1 0 -bpages 16 -index_limit 20000 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+elif [ "$5" == "disk-nocache" ]; then
+    PIN_ARGS="-buf_type 0 -comp1 -1 -stage1 0 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+elif [ "$5" == "disk-largebuf" ]; then
+    PIN_ARGS="-stage1 0 -outprefix ${OUTPREFIX} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
+elif [ "$5" == "struct" ]; then
+    PIN_ARGS="-buf_type 0 -stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+elif [ "$5" == "fields" ] || [ "$5" == "fields-sync" ]; then
+    PIN_ARGS="-stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+elif [ "$5" == "fields-sync" ]; then
+    PIN_ARGS="-fsync 1 -stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
 else
-    DIST_FILE="${IOSLEEP} ${DIST_FILE}"
-    if [ "$NAME" == "native" ]; then
-        PIN_ARGS=""
-    elif [ "$NAME" == "empty" ]; then
-        PIN_ARGS="-stage1 0 -bpages 16 ${PIN_EXTRA} ${DIST_FILE}"
-    elif [ "$NAME" == "disk" ]; then
-        PIN_ARGS="-stage1 0 -bpages 16 -index_limit 200000 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
-    elif [ "$NAME" == "disk-largebuf" ]; then
-        PIN_ARGS="-stage1 0 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
-    elif [ "$NAME" == "struct" ]; then
-        PIN_ARGS="-stage1 0 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
-    elif [ "$NAME" == "fields" ]; then
-        PIN_ARGS="-stage1 0 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
-    elif [ "$NAME" == "fields-empty" ]; then
-        PIN_ARGS="-stage1 0 -comp1 3 ${PIN_EXTRA} ${DIST_FILE}"
-    elif [ "$NAME" == "fields-threads" ]; then
-        PIN_ARGS="-stage1 12 -comp1 3 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
-    elif [ "$NAME" == "split" ]; then
-        PIN_ARGS="-stage1 0 -comp1 4 -stage2 1 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
-    elif [ "$NAME" == "split-empty" ]; then
-        PIN_ARGS="-stage1 0 -comp1 4 -stage2 1 ${PIN_EXTRA} ${DIST_FILE}"
-    elif [ "$NAME" == "pfor" ]; then
-        PIN_ARGS="-stage1 0 -comp1 4 -stage2 1 -comp2 1 -outprefix /home/michael/ssd/scratch/${APP}_tmp/${APP} ${PIN_EXTRA} ${DIST_FILE}"
-    else
-        echo "Invalid Pin mode: $NAME"
-        exit 1
-    fi
+    echo "Invalid Pin mode: $5"
+    exit 1
 fi
 
 
@@ -154,6 +156,15 @@ if [ "$CPU_LIMIT" != "0" ]; then
     # Command to run pin in cgroup
     CG="sudo cgexec -g cpu:pin"
 fi
+if [ "$ZERO_COMPACT" == "1" ]; then
+    ssh $2 "sudo sh -c 'echo 0 > /proc/sys/vm/compaction_proactiveness'" > /dev/null
+fi
+if [ "$NO_COMPACT" == "1" ]; then
+    ssh $2 "sudo sh -c echo never > /sys/kernel/mm/transparent_hugepage/defrag" > /dev/null
+fi
+
+# Always disable NMI watchdog
+ssh $2 "sudo sh -c 'echo 0 > /proc/sys/kernel/nmi_watchdog'"
 
 # Always set swappiness to 0
 ssh $2 "sudo sh -c 'echo 0 > /proc/sys/vm/swappiness'"
@@ -167,6 +178,16 @@ ssh $2 "sudo sh -c 'echo off > /sys/devices/system/cpu/smt/control'"
 # Create temp directory for trace files
 ssh $2 "mkdir -p /home/michael/ssd/scratch/${APP}_tmp/"
 
+# For nocache runs:
+# - change permissions of /dev/hugepages
+# - reserve 768 hugepages
+# - start the consumer process
+if [[ $5 == *"-nocache" ]]; then
+    ssh $2 "sudo chown michael /dev/hugepages"
+    ssh $2 "sudo sh -c 'echo 768 > /proc/sys/vm/nr_hugepages'"
+    ssh $2 "cd /home/michael/software/PiTracer/source/tools/PiTracer/consumer; ./consumer ${OUTP_DIR}" &
+fi
+
 # Trials
 for i in $(seq 1 $1); do
     echo "========================================================================================"
@@ -176,12 +197,14 @@ for i in $(seq 1 $1); do
     # Drop caches
     ssh $2 "sudo /home/michael/ssd/drop_cache.sh"
 
+    # Start the contiguity script
+    ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
+
     # For memcached, run YCSB on the local machine
-    if [ "$3" == "memA" ] || [ "$3" == "memB" ] || [ "$3" == "memC" ] || [ "$3" == "memW" ] || [ "$3" == "memDY" ]; then
+    if [[ $3 == mem* ]]; then
         REGIONS=100
 
         # Run memcached as a background process
-        ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh memcached ${REGIONS} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
         ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
 
         # Get khugepaged runtime using perf
@@ -191,8 +214,12 @@ for i in $(seq 1 $1); do
         # Run from YCSB root directory
         DIR=$(pwd)
         cd $YCSB_ROOT
-        $YCSB_LOAD 2>&1| grep -e "\[OVERALL\]" -e "\[READ\]" -e "\[UPDATE\]" -e "\[INSERT\]" -e "FAILED\]"
-        $YCSB_RUN 2>&1| grep -e "\[OVERALL\]" -e "\[READ\]" -e "\[UPDATE\]" -e "\[INSERT\]" -e "FAILED\]"
+        # Load
+        $YCSB_LOAD 2>&1| grep -e "\[OVERALL\]" -e "\[READ\]" -e "\[UPDATE\]" -e "\[INSERT\]" -e "FAILED\]" | tee $APP_OUT_DIR/load_$i.out
+
+        # Get midway vm stats
+        ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_loaded_${APP}_$i.txt
+        $YCSB_RUN 2>&1| grep -e "\[OVERALL\]" -e "\[READ\]" -e "\[UPDATE\]" -e "\[INSERT\]" -e "FAILED\]" | tee $APP_OUT_DIR/run_$i.out
         cd - > /dev/null
 
         # End the memcached server
@@ -203,19 +230,29 @@ for i in $(seq 1 $1); do
         wait $(jobs -p)
 
         # Get THP stats from /proc/vmstat
-        ssh $2 "grep -e 'thp' -e 'compact' /proc/vmstat" > $THP_DIR/vmstat_${APP}_$i.txt
+        ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_${APP}_$i.txt
     else
-        ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh $3 > /home/michael/ISCA_2025_results/tmp/$5.txt" &
+        # ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh ${NAME} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
 
         # Execute the remote script, produces single output in ~/ISCA_2025_results/tmp/<app>.out
         ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep khugepaged) -a &> /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt" &
         ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep kcompactd) -a &> /home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt" &
-        ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}"
+        ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
+        PIN_PID=$!
+
+        # For mid-way vm stats, take a snapshot at 10s for empty, and native configurations. Snapshot at 5min for disk configurations.
+        if [[ $5 == *"disk"* ]] || [[ $5 == *"fields"* ]]; then
+            sleep 300
+            ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_loaded_${APP}_$i.txt
+        fi
+
+        # Wait for the run to finish
+        wait $PIN_PID
         ssh $2 "sudo pkill -2 -f perf"
         wait $(jobs -p)
 
         # Get THP stats from /proc/vmstat
-        ssh $2 "grep -e 'thp' -e 'compact' /proc/vmstat" > $THP_DIR/vmstat_${APP}_$i.txt
+        ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_${APP}_$i.txt
     fi
 
     # Print size of trace directory
@@ -228,8 +265,8 @@ for i in $(seq 1 $1); do
     scp $2:/home/michael/ISCA_2025_results/tmp/${APP}.out $APP_OUT_DIR/${APP}_$i.out
     scp $2:/home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt $THP_DIR/khugepaged_${APP}_$i.txt
     scp $2:/home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt $THP_DIR/kcompactd_${APP}_$i.txt
-    scp $2:/home/michael/ISCA_2025_results/tmp/${APP}_$i.perf $APP_OUT_DIR/${APP}.perf
-    if [ "${DIST_FILE}" == "" ]; then
+    scp $2:/home/michael/ISCA_2025_results/tmp/${NAME}.perf $APP_OUT_DIR/${APP}_$i.perf
+    if [ "$DIST" == "1" ]; then
         scp $2:/home/michael/ISCA_2025_results/tmp/${APP}.dist $DIST_OUT_DIR/dist_$3_$i.txt
         ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${APP}.dist"
     fi
@@ -237,7 +274,7 @@ for i in $(seq 1 $1); do
     ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${APP}.out"
     ssh $2 "rm /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt"
     ssh $2 "rm /home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt"
-    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${APP}_$i.perf"
+    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${NAME}.perf"
 done
 
 # Clean up temp directory
