@@ -4,3 +4,9 @@ dump_pagemap
 check_contiguity
 src/test
 tmp*
+kern-module/*cmd*
+kern-module/*.o*
+kern-module/*.ko
+kern-module/*.mod*
+kern-module/*.symvers*
+kern-module/*.order*
