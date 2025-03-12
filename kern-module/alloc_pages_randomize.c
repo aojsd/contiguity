@@ -7,6 +7,7 @@
 #include <linux/init.h>
 #include <linux/types.h>
 
+
 static unsigned long total_gb = 1; // Default: 1GB
 static unsigned int immovable_pct = 50; // Default: 50%
 module_param(total_gb, ulong, 0644);
@@ -24,6 +25,7 @@ static unsigned long allocated_immovable = 0;
 static unsigned long allocated_movable = 0;
 static unsigned long allocated_pages = 0;
 
+// Allocate pages to induce fragmentation
 static int __init alloc_pages_test_init(void)
 {
     unsigned long total_pages = total_gb << (30 - PAGE_SHIFT); // Convert GB to pages
@@ -72,6 +74,7 @@ static int __init alloc_pages_test_init(void)
     return 0;
 }
 
+// Deallocate and exit
 static void __exit alloc_pages_test_exit(void)
 {
     struct page_entry *entry, *tmp;
