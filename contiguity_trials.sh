@@ -20,6 +20,7 @@ mkdir -p $THP_DIR
 
 # Parse extra arguments
 eval "$(python3 bash_parser.py "${@:6}")"
+echo "Tracking Pin memory: ${TRACK_PIN}"
 echo "THP setting: ${THP}"
 echo "THP pages per scan: ${THP_SCAN}"
 echo "THP sleep timer: ${THP_SLEEP}"
@@ -37,6 +38,9 @@ echo "Extra Pin arguments: ${PIN_EXTRA}"
 echo "Output directory: ${OUTDIR}"
 
 # Randomize the free list (or not)
+if [ "$FRAGMENT" != "0" ]; then
+    RANDOM_FREELIST=1
+fi
 ssh $2 "ISCA_2025_results/contiguity/random_freelist.sh $RANDOM_FREELIST"
 
 # Instruction distributions
@@ -109,6 +113,8 @@ if [ "$5" == "native" ]; then
     PIN_ARGS=""
 elif [ "$5" == "empty" ]; then
     PIN_ARGS="-stage1 0 -bpages 16 ${PIN_EXTRA} ${DIST_FILE}"
+elif [ "$5" == "empty-sleep" ]; then
+    PIN_ARGS="-stage1 0 -bpages 16 -iosleep 1 ${PIN_EXTRA} ${DIST_FILE}"
 elif [ "$5" == "disk" ]; then
     PIN_ARGS="-stage1 0 -bpages 16 -index_limit 20000 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
 elif [ "$5" == "disk-nocache" ]; then
@@ -136,6 +142,10 @@ echo "Rebooting $2"
 ssh $2 "sudo reboot"
 sleep 60
 
+# Fragment system if FRAGMENT != 0
+if [ "$FRAGMENT" != "0" ]; then
+    ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./kern_fragment.sh 1 $FRAGMENT 0"
+fi
 
 # System settings
 if [ "$THP" == "1" ]; then
