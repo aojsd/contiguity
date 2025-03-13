@@ -35,7 +35,7 @@ struct MemoryRegion {
 
     MemoryRegion(uint64_t addr, size_t sz, size_t rs) : address(addr), size(sz), rss(rs) {}
 };
-void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS);
+void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS, bool filter);
 std::vector<MemoryRegion> findLargestRegions(const std::vector<MemoryRegion> &regions, size_t totalRSS, float coverage, u64 max_regions);
 
 

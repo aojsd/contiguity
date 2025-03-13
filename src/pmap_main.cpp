@@ -42,7 +42,7 @@ int main(int argc, char **argv)
     // Find regions
     vector<MemoryRegion> regions;
     size_t totalRSS;
-    parsePmapOutput(regions, totalRSS);
+    parsePmapOutput(regions, totalRSS, max_regions != -1);
     vector<MemoryRegion> largestRegions = findLargestRegions(regions, totalRSS, coverage, max_regions);
     // cerr << "Regions (" << coverage * 100 << "% RSS):\t" << largestRegions.size() << endl;
 

@@ -39,7 +39,7 @@ echo "Output directory: ${OUTDIR}"
 # Randomize the free list (or not)
 ssh $2 "ISCA_2025_results/contiguity/random_freelist.sh $RANDOM_FREELIST"
 
-# if $DIST == 1
+# Instruction distributions
 if [ "$DIST" == "1" ]; then
     echo "Collecting access distribution"
     DIST_FILE="-record_file /home/michael/ISCA_2025_results/tmp/${APP}.dist"
@@ -200,13 +200,16 @@ for i in $(seq 1 $1); do
     # Drop caches
     ssh $2 "sudo /home/michael/ssd/drop_cache.sh"
 
+    # Set regions to -1 if tracking Pin memory (TRACK_PIN == 1)
+    if [ "$TRACK_PIN" == "1" ]; then
+        REGIONS="-1"
+    fi
+
     # Start the contiguity script
     ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
 
     # For memcached, run YCSB on the local machine
     if [[ $3 == mem* ]]; then
-        REGIONS=100
-
         # Run memcached as a background process
         ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
 
