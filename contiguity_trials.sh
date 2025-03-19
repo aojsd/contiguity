@@ -144,7 +144,8 @@ sleep 60
 
 # Fragment system if FRAGMENT != 0
 if [ "$FRAGMENT" != "0" ]; then
-    ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./kern_fragment.sh 1 $FRAGMENT 0"
+    ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./kern_fragment.sh 1 $FRAGMENT 100"
+    ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./kern_fragment.sh 0"
 fi
 
 # System settings
@@ -256,9 +257,12 @@ for i in $(seq 1 $1); do
         ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
         PIN_PID=$!
 
-        # For mid-way vm stats, take a snapshot at 10s for empty, and native configurations. Snapshot at 5min for disk configurations.
-        if [[ $5 == *"disk"* ]] || [[ $5 == *"fields"* ]]; then
+        # For mid-way vm stats, take a snapshot at 10s for empty and native configurations. Snapshot at 5min for disk configurations.
+        if [[ $5 == *"disk"* ]] || [[ $5 == *"fields"* ]] || [[ $5 == *"sleep"* ]]; then
             sleep 300
+            ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_loaded_${APP}_$i.txt
+        else
+            sleep 10
             ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_loaded_${APP}_$i.txt
         fi
 
@@ -291,6 +295,10 @@ for i in $(seq 1 $1); do
     ssh $2 "rm /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt"
     ssh $2 "rm /home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt"
     ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${NAME}.perf"
+
+    # Copy page tables
+    scp -r $2:/home/michael/ISCA_2025_results/tmp/ptables $OUTDIR/ptables_$i
+    ssh $2 "rm -rf /home/michael/ISCA_2025_results/tmp/ptables"
 done
 
 # Clean up temp directory

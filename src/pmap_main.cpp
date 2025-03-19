@@ -27,16 +27,17 @@ vector<u64> region_starts_P;
 // - stdin: the output of pmap -x <pid>
 int main(int argc, char **argv)
 {
-    if (argc < 2) {
-        cerr << "Usage: sudo "<< argv[0] << " <pid> [max_regions]\n";
+    if (argc < 3) {
+        cerr << "Usage: sudo "<< argv[0] << " <pid> <outfile> [max_regions]\n";
         return EXIT_FAILURE;
     }
+    string out_file = argv[2];
 
     // If max regions is specified, use it instead of coverage
     int max_regions = INT32_MAX;
-    if (argc == 3) {
+    if (argc == 4) {
         coverage = 1;
-        max_regions = stoi(argv[2]);
+        max_regions = stoi(argv[3]);
     }
 
     // Find regions
@@ -88,6 +89,11 @@ int main(int argc, char **argv)
                 u64 end = last_PFN + 1;
                 count_pow2(start, end, CONT_HIGHEST, power2_regions);
 
+                // Track region start
+                region_starts_V.push_back(last_VPN - region_size + 1);
+                region_lengths.push_back(region_size);
+                region_starts_P.push_back(last_PFN - region_size + 1);
+
                 // Reset region
                 region_size = 0;
                 last_VPN = 0;
@@ -111,6 +117,11 @@ int main(int argc, char **argv)
                     u64 start = last_PFN - region_size + 1;
                     u64 end = last_PFN + 1;
                     count_pow2(start, end, CONT_HIGHEST, power2_regions);
+
+                    // Track region start
+                    region_starts_V.push_back(last_VPN - region_size + 1);
+                    region_lengths.push_back(region_size);
+                    region_starts_P.push_back(last_PFN - region_size + 1);
                 }
                 region_size = 1;
             }
@@ -134,4 +145,16 @@ int main(int argc, char **argv)
         cout << "," << r;
     }
     cout << endl;
+
+    // Write data on contiguous regions to file
+    ofstream out(out_file);
+    if (!out.is_open()) {
+        cerr << "Failed to open file " << out_file << endl;
+        return EXIT_FAILURE;
+    }
+    out << "VPN,PFN,Size\n";
+    for (size_t i = 0; i < region_starts_V.size(); i++) {
+        out << hex << region_starts_V[i] << "," << region_starts_P[i] << "," << region_lengths[i] << endl;
+    }
+    out.close();
 }

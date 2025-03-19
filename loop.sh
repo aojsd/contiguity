@@ -4,6 +4,7 @@ if [ $# -lt 1 ]; then
     echo "Usage: $0 <process_name> [max_regions]"
     exit 1
 fi
+TMP_DIR=/home/michael/ISCA_2025_results/tmp
 
 # Name to match
 process_name="$1"
@@ -35,7 +36,7 @@ done
 
 # Found process
 echo "Monitoring contiguity of process $pid (name: $full_process_name)..." 1>&2
-sudo perf stat -e task-clock,cycles -p ${pid} -a &> /home/michael/ISCA_2025_results/tmp/${process_name}.perf &
+sudo perf stat -e task-clock,cycles -p ${pid} -a &> ${TMP_DIR}/${process_name}.perf &
 
 # Fields: Time, n_regions, r75, r50, r25, Tracked RSS, Total RSS, n_mappings, list_mappings
 DIR=/home/michael/ISCA_2025_results/contiguity/
@@ -45,10 +46,11 @@ echo "Time,Tracked-RSS,Total-RSS,n_mappings,4K,8K,16K,32K,64K,128K,256K,512K,1M,
 sleep 5
 
 # Loop until the process with the given PID is no longer running
+mkdir -p ${TMP_DIR}/ptables
 while ps -p $pid > /dev/null; do
     PTIME=$(ps -p $pid -o etime=)
     TIME=$(python3 $DIR/parse_time.py $PTIME)
-    CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid $2)
+    CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid ${TMP_DIR}/ptables/pagemap $2)
     RET=$?
 
     # Check that CONTIG is not just whitespace or empty
@@ -62,7 +64,12 @@ while ps -p $pid > /dev/null; do
             break
         fi
     else
-        echo "$TIME,$CONTIG"
+        # Check if CONTIG has changed
+        if [ "$CONTIG" != "$PREV_CONTIG" ]; then
+            echo "$TIME,$CONTIG"
+            PREV_CONTIG=$CONTIG
+            mv ${TMP_DIR}/ptables/pagemap ${TMP_DIR}/ptables/pagemap_${TIME}.txt
+        fi
     fi
     sleep 30
 done
