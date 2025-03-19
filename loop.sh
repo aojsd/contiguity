@@ -69,6 +69,8 @@ while ps -p $pid > /dev/null; do
             echo "$TIME,$CONTIG"
             PREV_CONTIG=$CONTIG
             mv ${TMP_DIR}/ptables/pagemap ${TMP_DIR}/ptables/pagemap_${TIME}.txt
+        else
+            rm ${TMP_DIR}/ptables/pagemap
         fi
     fi
     sleep 30
