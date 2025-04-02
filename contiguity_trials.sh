@@ -1,7 +1,7 @@
 # Run trials of application using remote "run_pin.sh" script
-# Usage: ./pin_trials.sh <num_trials> <remote_host> <app> <output_dir> <pin_mode> <Other>
+# Usage: ./contiguity_trials.sh <num_trials> <remote_host> <app> <output_dir> <pin_mode> <Other>
 if [ "$#" -lt 5 ]; then
-    echo "Usage: ./pin_trials.sh <num_trials> <remote_host> <app> <output_dir> <pin_mode> <Other>"
+    echo "Usage: ./contiguity_trials.sh <num_trials> <remote_host> <app> <output_dir> <pin_mode> <Other>"
     exit 1
 fi
 
@@ -33,6 +33,7 @@ fi
 echo "Dirty bytes setting (bytes): ${DIRTY}"
 echo "Dirty background bytes (bytes): ${DIRTY_BG}"
 echo "CPU usage limit: ${CPU_LIMIT}"
+echo "Time Dilation: ${TIME_DILATION}"
 echo "Loop initial sleep time: ${LOOP_SLEEP}"
 echo "Extra Pin arguments: ${PIN_EXTRA}"
 echo "Output directory: ${OUTDIR}"
@@ -118,7 +119,8 @@ elif [ "$5" == "empty-sleep" ]; then
 elif [ "$5" == "disk" ]; then
     PIN_ARGS="-stage1 0 -bpages 16 -index_limit 20000 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
 elif [ "$5" == "disk-nocache" ]; then
-    PIN_ARGS="-buf_type 0 -comp1 -1 -stage1 0 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+    PIN_ARGS="-comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+    NOCACHE=1
 elif [ "$5" == "disk-largebuf" ]; then
     PIN_ARGS="-stage1 0 -outprefix ${OUTPREFIX} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
 elif [ "$5" == "struct" ]; then
@@ -127,6 +129,10 @@ elif [ "$5" == "fields" ] || [ "$5" == "fields-sync" ]; then
     PIN_ARGS="-stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
 elif [ "$5" == "fields-sync" ]; then
     PIN_ARGS="-fsync 1 -stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+elif [ "$5" == "pitracer" ]; then
+    PIN_ARGS="-comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+    NOCACHE=1
+    CONSUMER_ZSTD=1
 else
     echo "Invalid Pin mode: $5"
     exit 1
@@ -159,23 +165,34 @@ if [ "$DIRTY" != "0" ]; then
     ssh $2 "sudo sh -c 'echo $DIRTY > /proc/sys/vm/dirty_bytes'" > /dev/null
     ssh $2 "sudo sh -c 'echo $DIRTY_BG > /proc/sys/vm/dirty_background_bytes'" > /dev/null
 fi
-if [ "$CPU_LIMIT" != "0" ]; then
-    # Set MAX_CPU = (CPU_LIMIT / 100 * 100000)
-    MAX_CPU=$(echo "$CPU_LIMIT 100000" | awk '{print $1 * $2 / 100}')
-
-    # Make cgroup for pin
-    ssh $2 "sudo mkdir /sys/fs/cgroup/pin"
-    ssh $2 "echo "$MAX_CPU 100000" | sudo tee /sys/fs/cgroup/pin/cpu.max"
-
-    # Command to run pin in cgroup
-    CG="sudo cgexec -g cpu:pin"
-fi
 if [ "$ZERO_COMPACT" == "1" ]; then
     ssh $2 "sudo sh -c 'echo 0 > /proc/sys/vm/compaction_proactiveness'" > /dev/null
 fi
 if [ "$NO_COMPACT" == "1" ]; then
     ssh $2 "sudo sh -c echo never > /sys/kernel/mm/transparent_hugepage/defrag" > /dev/null
 fi
+
+# Speed settings
+if [ "$CPU_LIMIT" != "0" ]; then
+    # Set MAX_CPU = (CPU_LIMIT / 100 * 100000)
+    MAX_CPU=$(echo "$CPU_LIMIT 100000" | awk '{print $1 * $2 / 100}')
+
+    # Make cgroup for pin
+    ssh $2 "sudo mkdir /sys/fs/cgroup/pin"
+    ssh $2 "sudo chmod o+w /sys/fs/cgroup/cgroup.procs"
+    ssh $2 "sudo chmod o+w /sys/fs/cgroup/pin/cgroup.procs"
+
+    # To allow PIN to initialize, avoid setting the CPU limit here
+    # ssh $2 "echo "$MAX_CPU 100000" | sudo tee /sys/fs/cgroup/pin/cpu.max"
+
+    # Command to run pin in cgroup
+    CG="cgexec -g cpu:pin"
+fi
+ssh $2 "~/reset_time_dilation.sh"
+if [ "$TIME_DILATION" != "0" ]; then
+    ssh $2 "sudo sh -c 'echo $TIME_DILATION > /proc/sys/time_dilation/time_dilation'" > /dev/null
+fi
+
 
 # Always disable NMI watchdog
 ssh $2 "sudo sh -c 'echo 0 > /proc/sys/kernel/nmi_watchdog'"
@@ -194,12 +211,13 @@ ssh $2 "mkdir -p /home/michael/ssd/scratch/${APP}_tmp/"
 
 # For nocache runs:
 # - change permissions of /dev/hugepages
-# - reserve 768 hugepages
+# - reserve 512 hugepages
 # - start the consumer process
-if [[ $5 == *"-nocache" ]]; then
-    ssh $2 "sudo chown michael /dev/hugepages"
-    ssh $2 "sudo sh -c 'echo 768 > /proc/sys/vm/nr_hugepages'"
-    ssh $2 "cd /home/michael/software/PiTracer/source/tools/PiTracer/consumer; ./consumer ${OUTP_DIR}" &
+ssh $2 "sudo chown michael /dev/hugepages"
+ssh $2 "sudo sh -c 'echo 1024 > /proc/sys/vm/nr_hugepages'"
+if [ "$NOCACHE" == "1" ]; then
+    C_DIR="/home/michael/software/PiTracer/source/tools/PiTracer/consumer"
+    ssh $2 "$C_DIR/consumer ${OUTP_DIR} ${CONSUMER_ZSTD}" &
 fi
 
 # Trials
@@ -221,12 +239,18 @@ for i in $(seq 1 $1); do
 
     # For memcached, run YCSB on the local machine
     if [[ $3 == mem* ]]; then
-        # Run memcached as a background process
-        ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
-
         # Get khugepaged runtime using perf
         ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep khugepaged) -a &> /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt" &
         ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep kcompactd) -a &> /home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt" &
+
+        # Run memcached as a background process
+        ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
+
+        # Start CPU Limit
+        if [ "$CPU_LIMIT" != "0" ]; then
+            sleep 5
+            ssh $2 "echo "$MAX_CPU 100000" | sudo tee /sys/fs/cgroup/pin/cpu.max"
+        fi
 
         # Run from YCSB root directory
         DIR=$(pwd)
@@ -240,22 +264,34 @@ for i in $(seq 1 $1); do
         cd - > /dev/null
 
         # End the memcached server
-        ssh $2 "sudo pkill -2 -f memcached"
+        ssh $2 "sudo pkill -2 -f /home/michael/software/memcached/memcached"
 
         # End the khugepaged perf process
         ssh $2 "sudo pkill -2 -f perf"
         wait $(jobs -p)
 
+        # End CPU Limit
+        if [ "$CPU_LIMIT" != "0" ]; then
+            ssh $2 "echo "100000 100000" | sudo tee /sys/fs/cgroup/pin/cpu.max"
+        fi
+        if [ "$TIME_DILATION" != "0" ]; then
+            ssh $2 "sudo sh -c 'echo 0 > /proc/sys/time_dilation/time_dilation'" > /dev/null
+        fi
+
         # Get THP stats from /proc/vmstat
         ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_${APP}_$i.txt
     else
-        # ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh ${NAME} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
-
         # Execute the remote script, produces single output in ~/ISCA_2025_results/tmp/<app>.out
         ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep khugepaged) -a &> /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt" &
         ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep kcompactd) -a &> /home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt" &
         ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
         PIN_PID=$!
+
+        # Start CPU Limit
+        if [ "$CPU_LIMIT" != "0" ]; then
+            sleep 5
+            ssh $2 "echo "$MAX_CPU 100000" | sudo tee /sys/fs/cgroup/pin/cpu.max"
+        fi
 
         # For mid-way vm stats, take a snapshot at 10s for empty and native configurations. Snapshot at 5min for disk configurations.
         if [[ $5 == *"disk"* ]] || [[ $5 == *"fields"* ]] || [[ $5 == *"sleep"* ]]; then
@@ -270,6 +306,10 @@ for i in $(seq 1 $1); do
         wait $PIN_PID
         ssh $2 "sudo pkill -2 -f perf"
         wait $(jobs -p)
+
+        if [ "$TIME_DILATION" != "0" ]; then
+            ssh $2 "sudo sh -c 'echo 0 > /proc/sys/time_dilation/time_dilation'" > /dev/null
+        fi
 
         # Get THP stats from /proc/vmstat
         ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_${APP}_$i.txt
@@ -297,6 +337,9 @@ for i in $(seq 1 $1); do
     ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${NAME}.perf"
 
     # Copy page tables
+    # Overwrite
+    rm -rf $OUTDIR/ptables_$i
+    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/ptables/pagemap"
     scp -r $2:/home/michael/ISCA_2025_results/tmp/ptables $OUTDIR/ptables_$i
     ssh $2 "rm -rf /home/michael/ISCA_2025_results/tmp/ptables"
 done
