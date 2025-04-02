@@ -144,7 +144,7 @@ int main(int argc, char **argv)
     double tracked_rss_gb = double(total_pages) * 4096 / 1024 / 1024 / 1024;
     double rss_gb = double(totalRSS) / 1024 / 1024 / 1024;
     cout << dec << fixed << setprecision(3);
-    cout << virtual_gb << " GB\t" << tracked_rss_gb << "GB," << rss_gb << "GB," << largestRegions.size();
+    cout << virtual_gb << " GB," << tracked_rss_gb << "GB," << rss_gb << "GB," << largestRegions.size();
     for (u64 r : power2_regions) {
         cout << "," << r;
     }
