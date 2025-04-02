@@ -40,7 +40,7 @@ sudo perf stat -e task-clock,cycles,tlb:tlb_flush -p ${pid} -a &> ${TMP_DIR}/${p
 
 # Fields: Time, n_regions, r75, r50, r25, Tracked RSS, Total RSS, n_mappings, list_mappings
 DIR=/home/michael/ISCA_2025_results/contiguity/
-echo "Time,Tracked-RSS,Total-RSS,n_mappings,4K,8K,16K,32K,64K,128K,256K,512K,1M,2M,4M,8M,16M,32M,64M,128M,256M,512M,1G"
+echo "Time,Tracked-VSize,Tracked-RSS,Total-RSS,n_mappings,4K,8K,16K,32K,64K,128K,256K,512K,1M,2M,4M,8M,16M,32M,64M,128M,256M,512M,1G"
 
 # Initial sleep, default 5s
 sleep 5

@@ -50,8 +50,10 @@ int main(int argc, char **argv)
     // Get mappings
     pid_t pid = stoul(argv[1]);
     size_t pageSize = sysconf(_SC_PAGE_SIZE);
+    size_t total_virtual_size = 0;
     vector<tuple<uintptr_t, uintptr_t>> mappings;
     for (const auto &region : largestRegions) {
+        total_virtual_size += region.size;
         for (size_t i = 0; i < region.size; i += pageSize) {
             uintptr_t vaddr = region.address + i;
             uintptr_t paddr;
@@ -138,9 +140,11 @@ int main(int argc, char **argv)
     // 2. Percentage of total RSS
     // 3. Mappings Scanned
     // 4-18. Number of regions of size 2^4, 2^5, ..., 2^18
+    double virtual_gb = double(total_virtual_size) / 1024 / 1024 / 1024;
     double tracked_rss_gb = double(total_pages) * 4096 / 1024 / 1024 / 1024;
     double rss_gb = double(totalRSS) / 1024 / 1024 / 1024;
-    cout << dec << fixed << setprecision(3) << tracked_rss_gb << "GB," << rss_gb << "GB," << largestRegions.size();
+    cout << dec << fixed << setprecision(3);
+    cout << virtual_gb << " GB\t" << tracked_rss_gb << "GB," << rss_gb << "GB," << largestRegions.size();
     for (u64 r : power2_regions) {
         cout << "," << r;
     }
