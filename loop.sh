@@ -46,6 +46,7 @@ echo "Time,Tracked-VSize,Tracked-RSS,Total-RSS,n_mappings,4K,8K,16K,32K,64K,128K
 sleep 5
 
 # Loop until the process with the given PID is no longer running
+rm -rf ${TMP_DIR}/ptables
 mkdir -p ${TMP_DIR}/ptables
 while ps -p $pid > /dev/null; do
     PTIME=$(ps -p $pid -o etime=)
