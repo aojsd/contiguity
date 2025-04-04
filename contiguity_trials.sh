@@ -102,6 +102,8 @@ YCSB_RUN="python2 ${YCSB_ROOT}/bin/ycsb run memcached -P ${YCSB_ROOT}/workloads/
 scp /home/michael/ISCA_2025_results/run_pin.sh $2:/home/michael/ISCA_2025_results/run_pin.sh
 ssh $2 "chmod +x /home/michael/ISCA_2025_results/run_pin.sh"
 
+# Remove ptables directory
+ssh $2 "rm -rf /home/michael/ISCA_2025_results/tmp/ptables"
 
 # ==========================================================================================================
 # Select Pin mode
