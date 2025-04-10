@@ -22,9 +22,11 @@ typedef struct {
     unsigned int file_page : 1;
     unsigned int swapped : 1;
     unsigned int present : 1;
+    unsigned int thp : 1;
+    unsigned int hugetlb : 1;
 } PagemapEntry;
-int pagemap_get_entry(PagemapEntry *entry, int pagemap_fd, uintptr_t vaddr);
-int virt_to_phys_user(uintptr_t *paddr, pid_t pid, uintptr_t vaddr);
+int pagemap_get_entry(PagemapEntry *entry, uintptr_t vaddr, int pagemap_fd, int kflags_fd);
+int virt_to_phys_user(uintptr_t *paddr, uintptr_t vaddr, int pagemap_fd, int kflags_fd);
 int parse_all(int argc, char **argv);
 
 
@@ -41,4 +43,4 @@ std::vector<MemoryRegion> findLargestRegions(const std::vector<MemoryRegion> &re
 
 #define CONT_LOWEST 0
 #define CONT_HIGHEST 18
-void count_pow2(u64 start, u64 end, int pow_largest, u64* region_count);
+void count_pow2(u64 start, u64 end, u64 v_start, int pow_largest, u64* region_count);

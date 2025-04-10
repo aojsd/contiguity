@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <cassert>
 
 #include "pmap.h"
 
@@ -16,7 +17,7 @@
  * @param[in]  vaddr      virtual address to get entry for
  * @return 0 for success, 1 for failure
  */
-int pagemap_get_entry(PagemapEntry *entry, int pagemap_fd, uintptr_t vaddr)
+int pagemap_get_entry(PagemapEntry *entry, uintptr_t vaddr, int pagemap_fd, int kflags_fd)
 {
     size_t nread;
     ssize_t ret;
@@ -36,32 +37,51 @@ int pagemap_get_entry(PagemapEntry *entry, int pagemap_fd, uintptr_t vaddr)
     entry->file_page = (data >> 61) & 1;
     entry->swapped = (data >> 62) & 1;
     entry->present = (data >> 63) & 1;
+
+    // Find kpageflags entry
+    uint64_t page_flags;
+    nread = 0;
+    while (nread < sizeof(page_flags)) {
+        ret = pread(kflags_fd, ((uint8_t*)&page_flags) + nread, sizeof(page_flags) - nread,
+                (entry->pfn * sizeof(page_flags)) + nread);
+        nread += ret;
+        if (ret <= 0) {
+            return 1;
+        }
+    }
+    entry->thp = (page_flags >> 22) & 1;
+    entry->hugetlb = (page_flags >> 17) & 1;
     return 0;
 }
 
-/* Convert the given virtual address to physical using /proc/PID/pagemap.
+/* Convert the given virtual address to physical using an already opened /proc/PID/pagemap file descriptor.
  *
- * @param[out] paddr physical address
- * @param[in]  pid   process to convert for
- * @param[in] vaddr virtual address to get entry for
+ * @param[out] paddr      physical address
+ * @param[in]  pagemap_fd file descriptor to an open /proc/PID/pagemap file
+ * @param[in]  vaddr      virtual address to get entry for
  * @return 0 for success, 1 for failure
  */
-int virt_to_phys_user(uintptr_t *paddr, pid_t pid, uintptr_t vaddr)
+int virt_to_phys_user(uintptr_t *paddr, uintptr_t vaddr, int pagemap_fd, int kflags_fd)
 {
-    char pagemap_file[BUFSIZ];
-    int pagemap_fd;
-
-    snprintf(pagemap_file, sizeof(pagemap_file), "/proc/%ju/pagemap", (uintmax_t)pid);
-    pagemap_fd = open(pagemap_file, O_RDONLY);
-    if (pagemap_fd < 0) {
-        return 1;
-    }
     PagemapEntry entry;
-    if (pagemap_get_entry(&entry, pagemap_fd, vaddr)) {
+    if (pagemap_get_entry(&entry, vaddr, pagemap_fd, kflags_fd)) {
         return 1;
     }
-    close(pagemap_fd);
-    *paddr = (entry.pfn * sysconf(_SC_PAGE_SIZE)) + (vaddr % sysconf(_SC_PAGE_SIZE));
+
+    // Check for mapped virtual page
+    if (entry.present == 1) {
+        *paddr = (entry.pfn * sysconf(_SC_PAGE_SIZE)) + (vaddr % sysconf(_SC_PAGE_SIZE));
+        *paddr += entry.thp;
+    }
+    else {
+        *paddr = 0;
+    }
+
+    // Check for hugepage
+    if (entry.thp || entry.hugetlb) {
+        uint64_t huge_mask = (1 << 9) - 1;
+        assert((entry.pfn & huge_mask) == ((vaddr >> 12) & huge_mask));
+    }
     return 0;
 }
 
@@ -70,9 +90,11 @@ int parse_all(int argc, char **argv)
     char buffer[BUFSIZ];
     char maps_file[BUFSIZ];
     char pagemap_file[BUFSIZ];
+    char kpageflags_file[BUFSIZ];
     int maps_fd;
     int offset = 0;
     int pagemap_fd;
+    int kflags_fd;
     pid_t pid;
 
     if (argc < 2) {
@@ -82,6 +104,7 @@ int parse_all(int argc, char **argv)
     pid = strtoull(argv[1], NULL, 0);
     snprintf(maps_file, sizeof(maps_file), "/proc/%ju/maps", (uintmax_t)pid);
     snprintf(pagemap_file, sizeof(pagemap_file), "/proc/%ju/pagemap", (uintmax_t)pid);
+    snprintf(kpageflags_file, sizeof(kpageflags_file), "/proc/kpageflags");
     maps_fd = open(maps_file, O_RDONLY);
     if (maps_fd < 0) {
         perror("open maps");
@@ -90,6 +113,11 @@ int parse_all(int argc, char **argv)
     pagemap_fd = open(pagemap_file, O_RDONLY);
     if (pagemap_fd < 0) {
         perror("open pagemap");
+        return EXIT_FAILURE;
+    }
+    kflags_fd = open(kpageflags_file, O_RDONLY);
+    if (kflags_fd < 0) {
+        perror("open kpageflags");
         return EXIT_FAILURE;
     }
     printf("addr pfn soft-dirty file/shared swapped present library\n");
@@ -147,7 +175,7 @@ int parse_all(int argc, char **argv)
                     PagemapEntry entry;
                     for (uintptr_t addr = low; addr < high; addr += sysconf(_SC_PAGE_SIZE)) {
                         /* TODO always fails for the last page (vsyscall), why? pread returns 0. */
-                        if (!pagemap_get_entry(&entry, pagemap_fd, addr)) {
+                        if (!pagemap_get_entry(&entry, addr, pagemap_fd, kflags_fd)) {
                             printf("%jx %jx %u %u %u %u %s\n",
                                 (uintmax_t)addr,
                                 (uintmax_t)entry.pfn,

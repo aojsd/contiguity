@@ -55,9 +55,8 @@ while ps -p $pid > /dev/null; do
 
     # Check that CONTIG is not just whitespace or empty
     if [[ -z "${CONTIG// }" ]]; then
-        # If SIGSEGV, then process just hasn't started
+        # If SIGSEGV, then process just hasn't started or has exited
         if [ $RET -eq 139 ]; then
-            # echo "$TIME   0 0 0 0 0GB 0GB 0 0"
             sleep 1
         else
             echo "$pid: $full_process_name has exited" 1>&2
@@ -68,9 +67,10 @@ while ps -p $pid > /dev/null; do
         if [ "$CONTIG" != "$PREV_CONTIG" ]; then
             echo "$TIME,$CONTIG"
             PREV_CONTIG=$CONTIG
+            rm -rf ${TMP_DIR}/ptables/pagemap_${TIME}.txt
             mv ${TMP_DIR}/ptables/pagemap ${TMP_DIR}/ptables/pagemap_${TIME}.txt
         else
-            rm ${TMP_DIR}/ptables/pagemap
+            rm -rf ${TMP_DIR}/ptables/pagemap
         fi
     fi
     sleep 30
