@@ -11,14 +11,6 @@ HOST=$2
 APP=$3
 OUTDIR=$4
 
-# Parse extra arguments
-eval "$(python3 bash_parser.py "${@:5}")"
-echo "THP setting: ${THP}"
-echo "Dirty bytes setting (bytes): ${DIRTY}"
-echo "Dirty background bytes (bytes): ${DIRTY_BG}"
-echo "CPU usage limit: ${CPU_LIMIT}"
-echo "Extra Pin arguments: ${PIN_EXTRA}"
-
 set -x
 ARG_ARRAY=(${@:5})
 
@@ -27,3 +19,10 @@ ARG_ARRAY=(${@:5})
 
 # Empty
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR empty "${ARG_ARRAY[@]}"
+
+# Fields
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR fields "${ARG_ARRAY[@]}"
+
+# Pitracer
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR pitracer "${ARG_ARRAY[@]}"
+set +x

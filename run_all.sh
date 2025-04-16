@@ -12,7 +12,7 @@ APP=$3
 OUTDIR=$4
 
 # Parse extra arguments
-eval "$(python3 bash_parser.py "${@:5}")"
+eval "$(python3 src/python/bash_parser.py "${@:5}")"
 echo "THP setting: ${THP}"
 echo "Dirty bytes setting (bytes): ${DIRTY}"
 echo "Dirty background bytes (bytes): ${DIRTY_BG}"
@@ -28,8 +28,11 @@ ARG_ARRAY=(${@:5})
 # Empty
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR empty "${ARG_ARRAY[@]}"
 
-# Fields
+# ZSTD
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR fields "${ARG_ARRAY[@]}"
+
+# Pitracer
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR pitracer "${ARG_ARRAY[@]}"
 
 # Disk no-cache
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk-nocache "${ARG_ARRAY[@]}"
@@ -37,5 +40,8 @@ ARG_ARRAY=(${@:5})
 # Disk
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk "${ARG_ARRAY[@]}"
 
-# Disk large buffer
+# Disk Large-buf
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk-largebuf "${ARG_ARRAY[@]}"
+
+# Empty-sleep
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR empty-sleep "${ARG_ARRAY[@]}"

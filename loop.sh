@@ -49,7 +49,7 @@ sleep 5
 mkdir -p ${TMP_DIR}/ptables
 while ps -p $pid > /dev/null; do
     PTIME=$(ps -p $pid -o etime=)
-    TIME=$(python3 $DIR/parse_time.py $PTIME)
+    TIME=$(python3 $DIR/src/python/parse_time.py $PTIME)
     CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid ${TMP_DIR}/ptables/pagemap $2)
     RET=$?
 
@@ -67,10 +67,9 @@ while ps -p $pid > /dev/null; do
         if [ "$CONTIG" != "$PREV_CONTIG" ]; then
             echo "$TIME,$CONTIG"
             PREV_CONTIG=$CONTIG
-            rm -rf ${TMP_DIR}/ptables/pagemap_${TIME}.txt
             mv ${TMP_DIR}/ptables/pagemap ${TMP_DIR}/ptables/pagemap_${TIME}.txt
         else
-            rm -rf ${TMP_DIR}/ptables/pagemap
+            rm ${TMP_DIR}/ptables/pagemap
         fi
     fi
     sleep 30

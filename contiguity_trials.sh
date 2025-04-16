@@ -19,7 +19,7 @@ mkdir -p $DIST_OUT_DIR
 mkdir -p $THP_DIR
 
 # Parse extra arguments
-eval "$(python3 bash_parser.py "${@:6}")"
+eval "$(python3 src/python/bash_parser.py "${@:6}")"
 echo "Tracking Pin memory: ${TRACK_PIN}"
 echo "THP setting: ${THP}"
 echo "THP pages per scan: ${THP_SCAN}"
@@ -316,6 +316,10 @@ for i in $(seq 1 $1); do
         # Get THP stats from /proc/vmstat
         ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_${APP}_$i.txt
     fi
+
+    # Count number of times page table mappings changed - append to <app>_i.perf
+    P_SRC="/home/michael/ISCA_2025_results/contiguity/src/python"
+    ssh $2 "python3 $P_SRC/check_ptables.py /home/michael/ISCA_2025_results/tmp/ptables >> /home/michael/ISCA_2025_results/tmp/${NAME}.perf"
 
     # Print size of trace directory
     ssh $2 "du -sh /home/michael/ssd/scratch/${APP}_tmp/"
