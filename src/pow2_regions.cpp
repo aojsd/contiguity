@@ -15,9 +15,9 @@ void count_pow2(u64 start, u64 end, u64 v_start, int pow_largest, u64* region_co
     if (pow_largest < CONT_LOWEST || region_size == 0) return;
 
     // Region too small or virtual and physical alignment don't match, continue
-    // u64 pow_mask = (1 << pow_largest) - 1;
-    // if (region_size < ((u64) 1 << pow_largest) || ((start & pow_mask) != (v_start & pow_mask))) {
-    if (region_size < ((u64) 1 << pow_largest)) {
+    u64 pow_mask = (1 << pow_largest) - 1;
+    if (region_size < ((u64) 1 << pow_largest) || ((start & pow_mask) != (v_start & pow_mask))) {
+    // if (region_size < ((u64) 1 << pow_largest)) {
         count_pow2(start, end, v_start, pow_largest - 1, region_count);
         return;
     }

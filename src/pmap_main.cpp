@@ -10,6 +10,7 @@
 #include <fstream>
 #include <cstdint>
 #include <cassert>
+#include <filesystem>
 #include "pmap.h"
 
 using namespace std;
@@ -195,4 +196,12 @@ int main(int argc, char **argv)
         out << hex << region_starts_V[i] << "," << region_starts_P[i] << "," << region_lengths[i] << endl;
     }
     out.close();
+
+    // Ensure file has RW permissions
+    filesystem::permissions(out_file,
+        filesystem::perms::owner_read | filesystem::perms::owner_write |
+        filesystem::perms::group_read | filesystem::perms::group_write |
+        filesystem::perms::others_read | filesystem::perms::others_write,
+        filesystem::perm_options::replace
+    );
 }
