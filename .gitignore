@@ -1,4 +1,5 @@
 results/
+local_scripts/
 .vscode/
 dump_pagemap
 check_contiguity
