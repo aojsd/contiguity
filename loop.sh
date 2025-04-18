@@ -1,7 +1,7 @@
 #!/bin/bash
 # Take process name, waits for a process containing this name has over 50% CPU usage
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 <process_name> [max_regions]"
+    echo "Usage: $0 <process_name> [max_regions] [require_alignment]"
     exit 1
 fi
 TMP_DIR=/home/michael/ISCA_2025_results/tmp
@@ -50,7 +50,7 @@ mkdir -p ${TMP_DIR}/ptables
 while ps -p $pid > /dev/null; do
     PTIME=$(ps -p $pid -o etime=)
     TIME=$(python3 $DIR/src/python/parse_time.py $PTIME)
-    CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid ${TMP_DIR}/ptables/pagemap $2)
+    CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid ${TMP_DIR}/ptables/pagemap $2 $3)
     RET=$?
 
     # Check that CONTIG is not just whitespace or empty

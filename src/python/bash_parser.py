@@ -18,6 +18,7 @@ def main(args):
     parser.add_argument("--DIST", action="store_true", help="Collect access distribution", default=False)
     parser.add_argument("--RANDOM_FREELIST", action="store_true", help="Use random free list", default=False)
     parser.add_argument("--FRAGMENT", type=int, help="Fragmentation to generate (GB)", default=0)
+    parser.add_argument("--ALIGNED", action="store_true", help="require contiguous regions to be aligned", default=False)
     args = parser.parse_args(args)
 
     dirty_bytes = args.DIRTY << 12
@@ -36,6 +37,7 @@ def main(args):
     print(f"RANDOM_FREELIST={int(args.RANDOM_FREELIST)}")
     print(f"FRAGMENT={args.FRAGMENT}")
     print(f"TRACK_PIN={int(args.TRACK_PIN)}")
+    print(f"ALIGNED={int(args.ALIGNED)}")
     return
 
 if __name__ == "__main__":

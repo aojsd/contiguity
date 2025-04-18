@@ -16,6 +16,7 @@
 using namespace std;
 
 float coverage = 0.9;
+bool require_alignment = false;
 map<u64, int> region_sizes;
 vector<u64> region_starts_V;
 vector<u64> region_lengths;
@@ -29,16 +30,29 @@ vector<u64> region_starts_P;
 int main(int argc, char **argv)
 {
     if (argc < 3) {
-        cerr << "Usage: sudo "<< argv[0] << " <pid> <outfile> [max_regions]\n";
+        cerr << "Usage: sudo "<< argv[0] << " <pid> <outfile> [max_regions] [require_alignment]\n";
         return EXIT_FAILURE;
     }
     string out_file = argv[2];
 
     // If max regions is specified, use it instead of coverage
     int max_regions = INT32_MAX;
-    if (argc == 4) {
+    if (argc >= 4) {
         coverage = 1;
         max_regions = stoi(argv[3]);
+    }
+
+    // If require_alignment is specified, use it
+    if (argc >= 5) {
+        string arg = argv[4];
+        if (arg == "true" || arg == "1") {
+            require_alignment = true;
+        } else if (arg == "false" || arg == "0") {
+            require_alignment = false;
+        } else {
+            cerr << "Invalid value for require_alignment: " << arg << endl;
+            return EXIT_FAILURE;
+        }
     }
 
     // Find regions

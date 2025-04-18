@@ -21,6 +21,7 @@ mkdir -p $THP_DIR
 # Parse extra arguments
 eval "$(python3 src/python/bash_parser.py "${@:6}")"
 echo "Tracking Pin memory: ${TRACK_PIN}"
+echo "Alignment Required: ${ALIGNED}"
 echo "THP setting: ${THP}"
 echo "THP pages per scan: ${THP_SCAN}"
 echo "THP sleep timer: ${THP_SLEEP}"
@@ -157,11 +158,13 @@ if [ "$FRAGMENT" != "0" ]; then
 fi
 
 # System settings
+THP_KERNEL_DIR="/sys/kernel/mm/transparent_hugepage"
 if [ "$THP" == "1" ]; then
-    THP_KERNEL_DIR="/sys/kernel/mm/transparent_hugepage"
     ssh $2 "sudo sh -c 'echo always > $THP_KERNEL_DIR/enabled'" > /dev/null
     ssh $2 "sudo sh -c 'echo $THP_SCAN > $THP_KERNEL_DIR/khugepaged/pages_to_scan'" > /dev/null
     ssh $2 "sudo sh -c 'echo $THP_SLEEP > $THP_KERNEL_DIR/khugepaged/scan_sleep_millisecs'" > /dev/null
+else
+    ssh $2 "sudo sh -c 'echo never > $THP_KERNEL_DIR/enabled'" > /dev/null
 fi
 if [ "$DIRTY" != "0" ]; then
     ssh $2 "sudo sh -c 'echo $DIRTY > /proc/sys/vm/dirty_bytes'" > /dev/null
@@ -237,7 +240,7 @@ for i in $(seq 1 $1); do
     fi
 
     # Start the contiguity script
-    ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
+    ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh ${NAME} ${REGIONS} ${ALIGNED}> /home/michael/ISCA_2025_results/tmp/$5.txt" &
 
     # For memcached, run YCSB on the local machine
     if [[ $3 == mem* ]]; then
