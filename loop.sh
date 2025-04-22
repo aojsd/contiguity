@@ -62,6 +62,9 @@ while ps -p $pid > /dev/null; do
             echo "$pid: $full_process_name has exited" 1>&2
             break
         fi
+    else
+        # Check if CONTIG has changed
+        echo "$TIME,$CONTIG"
     fi
     sleep 30
 done
