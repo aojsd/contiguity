@@ -43,14 +43,14 @@ DIR=/home/michael/ISCA_2025_results/contiguity/
 echo "Time,Tracked-VSize,Tracked-RSS,Total-RSS,n_mappings,4K,8K,16K,32K,64K,128K,256K,512K,1M,2M,4M,8M,16M,32M,64M,128M,256M,512M,1G"
 
 # Initial sleep, default 5s
-sleep 5
+# sleep 5
 
 # Loop until the process with the given PID is no longer running
 mkdir -p ${TMP_DIR}/ptables
 while ps -p $pid > /dev/null; do
     PTIME=$(ps -p $pid -o etime=)
     TIME=$(python3 $DIR/src/python/parse_time.py $PTIME)
-    CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid ${TMP_DIR}/ptables/pagemap $2 $3)
+    CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid ${TMP_DIR}/ptables/pagemap_${TIME}.txt $2 $3)
     RET=$?
 
     # Check that CONTIG is not just whitespace or empty
@@ -61,15 +61,6 @@ while ps -p $pid > /dev/null; do
         else
             echo "$pid: $full_process_name has exited" 1>&2
             break
-        fi
-    else
-        # Check if CONTIG has changed
-        if [ "$CONTIG" != "$PREV_CONTIG" ]; then
-            echo "$TIME,$CONTIG"
-            PREV_CONTIG=$CONTIG
-            mv ${TMP_DIR}/ptables/pagemap ${TMP_DIR}/ptables/pagemap_${TIME}.txt
-        else
-            rm ${TMP_DIR}/ptables/pagemap
         fi
     fi
     sleep 30
