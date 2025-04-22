@@ -122,7 +122,11 @@ int main(int argc, char **argv)
                     u64 start = last_PFN - region_size + 1;
                     u64 end = last_PFN + 1;
                     u64 v_start = last_VPN - region_size + 1;
-                    count_pow2(start, end, v_start, CONT_HIGHEST, power2_regions);
+                    if (require_alignment) {
+                        count_pow2_aligned(start, end, v_start, CONT_HIGHEST, power2_regions);
+                    } else {
+                        count_pow2(start, end, CONT_HIGHEST, power2_regions);
+                    }
 
                     // Track region start
                     region_starts_V.push_back(last_VPN - region_size + 1);
@@ -154,7 +158,11 @@ int main(int argc, char **argv)
                         u64 start = last_PFN - region_size + 1;
                         u64 end = last_PFN + 1;
                         u64 v_start = last_VPN - region_size + 1;
-                        count_pow2(start, end, v_start, CONT_HIGHEST, power2_regions);
+                        if (require_alignment) {
+                            count_pow2_aligned(start, end, v_start, CONT_HIGHEST, power2_regions);
+                        } else {
+                            count_pow2(start, end, CONT_HIGHEST, power2_regions);
+                        }
 
                         // Track region start
                         region_starts_V.push_back(last_VPN - region_size + 1);
