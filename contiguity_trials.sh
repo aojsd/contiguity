@@ -240,7 +240,7 @@ for i in $(seq 1 $1); do
     fi
 
     # Start the contiguity script
-    ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh ${NAME} ${REGIONS} ${ALIGNED}> /home/michael/ISCA_2025_results/tmp/$5.txt" &
+    ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh ${NAME} ${REGIONS} ${ALIGNED} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
 
     # For memcached, run YCSB on the local machine
     if [[ $3 == mem* ]]; then
