@@ -16,7 +16,7 @@
 using namespace std;
 
 float coverage = 0.9;
-bool require_alignment = false;
+int require_alignment = 0;
 map<u64, int> region_sizes;
 vector<u64> region_starts_V;
 vector<u64> region_lengths;
@@ -46,9 +46,9 @@ int main(int argc, char **argv)
     if (argc >= 5) {
         string arg = argv[4];
         if (arg == "true" || arg == "1") {
-            require_alignment = true;
+            require_alignment = 1;
         } else if (arg == "false" || arg == "0") {
-            require_alignment = false;
+            require_alignment = 0;
         } else {
             cerr << "Invalid value for require_alignment: " << arg << endl;
             return EXIT_FAILURE;

@@ -43,5 +43,5 @@ std::vector<MemoryRegion> findLargestRegions(const std::vector<MemoryRegion> &re
 
 #define CONT_LOWEST 0
 #define CONT_HIGHEST 18
-extern bool require_alignment;
+extern int require_alignment;
 void count_pow2(u64 start, u64 end, u64 v_start, int pow_largest, u64* region_count);

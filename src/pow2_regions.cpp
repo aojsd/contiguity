@@ -20,7 +20,7 @@ void count_pow2(u64 start, u64 end, u64 v_start, int pow_largest, u64* region_co
         count_pow2(start, end, v_start, pow_largest - 1, region_count);
         return;
     }
-    else if (require_alignment && (start & pow_mask) != (v_start & pow_mask)) {
+    else if ((require_alignment == 1) && (start & pow_mask) != (v_start & pow_mask)) {
         count_pow2(start, end, v_start, pow_largest - 1, region_count);
         return;
     }
