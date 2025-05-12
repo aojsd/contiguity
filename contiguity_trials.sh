@@ -102,8 +102,8 @@ YCSB_RUN="python2 ${YCSB_ROOT}/bin/ycsb run memcached -P ${YCSB_ROOT}/workloads/
 scp /home/michael/ISCA_2025_results/run_pin.sh $2:/home/michael/ISCA_2025_results/run_pin.sh
 ssh $2 "chmod +x /home/michael/ISCA_2025_results/run_pin.sh"
 
-# Remove ptables directory
-ssh $2 "rm -rf /home/michael/ISCA_2025_results/tmp/ptables"
+# Reset time dilation
+ssh $2 "~/reset_time_dilation.sh"
 
 # ==========================================================================================================
 # Select Pin mode
@@ -150,6 +150,9 @@ echo "Rebooting $2"
 ssh $2 "sudo reboot"
 sleep 60
 
+# Remove ptables directory
+ssh $2 "rm -rf /home/michael/ISCA_2025_results/tmp/ptables"
+
 # Fragment system if FRAGMENT != 0
 if [ "$FRAGMENT" != "0" ]; then
     ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./kern_fragment.sh 1 $FRAGMENT 100"
@@ -190,9 +193,8 @@ if [ "$CPU_LIMIT" != "0" ]; then
     # Command to run pin in cgroup
     CG="cgexec -g cpu:pin"
 fi
-ssh $2 "~/reset_time_dilation.sh"
 if [ "$TIME_DILATION" != "0" ]; then
-    ssh $2 "sudo sh -c 'echo $TIME_DILATION > /proc/sys/time_dilation/time_dilation'" > /dev/null
+    ssh $2 "echo $TIME_DILATION | sudo tee /proc/sys/time_dilation/time_dilation" > /dev/null
 fi
 
 
@@ -292,6 +294,7 @@ for i in $(seq 1 $1); do
         # Start CPU Limit
         if [ "$CPU_LIMIT" != "0" ]; then
             sleep 5
+            echo "Setting CPU limit to $MAX_CPU after 600s"
             ssh $2 "echo "$MAX_CPU 100000" | sudo tee /sys/fs/cgroup/pin/cpu.max"
         fi
 
