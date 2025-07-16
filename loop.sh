@@ -5,6 +5,7 @@ if [ $# -lt 1 ]; then
     exit 1
 fi
 TMP_DIR=/home/michael/ISCA_2025_results/tmp
+CONT_DIR=/home/michael/ISCA_2025_results/contiguity
 
 # Name to match
 process_name="$1"
@@ -44,10 +45,10 @@ echo "Monitoring contiguity of process $pid (name: $full_process_name)..." 1>&2
 sudo perf stat -e instructions,L1-dcache-loads,L1-dcache-stores -p ${pid} -a &> ${TMP_DIR}/${process_name}.perf &
 
 # Profile kernel thread activity
-sudo ./kernel_work/kthread_cputime.bt > ${TMP_DIR}/${process_name}.kthread_cputime &
+sudo ${CONT_DIR}/kernel_work/kthread_cputime.bt > ${TMP_DIR}/${process_name}.kthread_cputime &
 
 # Track syscall activity
-sudo ./kernel_work/pid_syscalls.bt ${pid} > ${TMP_DIR}/${process_name}.syscalls &
+sudo ${CONT_DIR}/kernel_work/pid_syscalls.bt ${pid} > ${TMP_DIR}/${process_name}.syscalls &
 
 
 # =============================================

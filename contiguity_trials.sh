@@ -346,20 +346,25 @@ for i in $(seq 1 $1); do
     ssh $2 "mkdir -p /home/michael/ssd/scratch/${APP}_tmp/"
 
     # Copy the output to the local machine, renaming it to include the trial number
-    scp $2:/home/michael/ISCA_2025_results/tmp/$5.txt $OUTDIR/$5_$i.txt
-    scp $2:/home/michael/ISCA_2025_results/tmp/${APP}.out $APP_OUT_DIR/${APP}_$i.out
-    scp $2:/home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt $THP_DIR/khugepaged_${APP}_$i.txt
-    scp $2:/home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt $THP_DIR/kcompactd_${APP}_$i.txt
-    scp $2:/home/michael/ISCA_2025_results/tmp/${NAME}.perf $APP_OUT_DIR/${APP}_$i.perf
+    TMP_DIR="/home/michael/ISCA_2025_results/tmp"
+    scp $2:$TMP_DIR/$5.txt                      $OUTDIR/$5_$i.txt
+    scp $2:$TMP_DIR/${APP}.out                  $APP_OUT_DIR/${APP}_$i.out
+    scp $2:$TMP_DIR/khugepaged_${APP}_$i.txt    $THP_DIR/khugepaged_${APP}_$i.txt
+    scp $2:$TMP_DIR/kcompactd_${APP}_$i.txt     $THP_DIR/kcompactd_${APP}_$i.txt
+    scp $2:$TMP_DIR/${NAME}.perf                $APP_OUT_DIR/${APP}_$i.perf
+    scp $2:$TMP_DIR/${NAME}.kthread_cputime     $APP_OUT_DIR/${APP}_$i.kthread_cputime
+    scp $2:$TMP_DIR/${NAME}.syscalls            $APP_OUT_DIR/${APP}_$i.syscalls
     if [ "$DIST" == "1" ]; then
-        scp $2:/home/michael/ISCA_2025_results/tmp/${APP}.dist $DIST_OUT_DIR/dist_$3_$i.txt
-        ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${APP}.dist"
+        scp $2:$TMP_DIR/${APP}.dist             $DIST_OUT_DIR/dist_$3_$i.txt
+        ssh $2 "rm $TMP_DIR/${APP}.dist"
     fi
-    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/$5.txt"
-    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${APP}.out"
-    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt"
-    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt"
-    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/${NAME}.perf"
+    ssh $2 "rm $TMP_DIR/$5.txt"
+    ssh $2 "rm $TMP_DIR/${APP}.out"
+    ssh $2 "rm $TMP_DIR/khugepaged_${APP}_$i.txt"
+    ssh $2 "rm $TMP_DIR/kcompactd_${APP}_$i.txt"
+    ssh $2 "rm $TMP_DIR/${NAME}.perf"
+    ssh $2 "rm $TMP_DIR/${NAME}.kthread_cputime"
+    ssh $2 "rm $TMP_DIR/${NAME}.syscalls"
 
     # Copy page tables
     # Overwrite
