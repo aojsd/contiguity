@@ -6,7 +6,7 @@
 #
 # Usage:
 #   1. Save bpftrace output: sudo ./your_script.bt > output.txt
-#   2. Run this script on the file: python3 consolidate.py output.txt
+#   2. Run this script on the file: python3 kthread_parse.py output.txt
 #
 import sys
 import re
@@ -61,6 +61,7 @@ def main():
     consolidated_totals = defaultdict(int)
     consolidated_hists = defaultdict(lambda: defaultdict(int))
     consolidated_threads = defaultdict(set)
+    consolidated_invocations = defaultdict(int)
 
     total_re = re.compile(r'^@total_runtime\[(.*?)\]:\s*(\d+)$')
     hist_header_re = re.compile(r'^@invocations\[(.*?)\]:')
@@ -86,10 +87,12 @@ def main():
 
         if current_hist_base_name:
             if m := hist_line_re.search(line):
-                start_str, end_str, count = m.groups()
+                start_str, end_str, count_str = m.groups()
+                count = int(count_str)
                 start_val = parse_size(start_str)
                 end_val = parse_size(end_str)
-                consolidated_hists[current_hist_base_name][(start_val, end_val)] += int(count)
+                consolidated_hists[current_hist_base_name][(start_val, end_val)] += count
+                consolidated_invocations[current_hist_base_name] += count
 
     # --- Generate Formatted Output ---
     output_lines = ["--- Consolidated Kernel Thread On-CPU Time ---"]
@@ -98,14 +101,18 @@ def main():
         total_ns = consolidated_totals[base_name]
         total_ms = total_ns / 1_000_000
         num_threads = len(consolidated_threads[base_name])
+        invocations = consolidated_invocations[base_name]
 
         output_lines.append("\n" + "="*40)
+        # Modified to match the user's previous format
         output_lines.append(f" Thread Group: {base_name} ({num_threads} threads)")
         output_lines.append("="*40)
-        output_lines.append(f"  Total Combined On-CPU Time: {total_ns:,} ns ({total_ms:,.3f} ms)")
+        output_lines.append(f"\tTotal Invocations: {invocations:,}")
+        output_lines.append(f"\tTotal Combined On-CPU Time: {total_ns:,} ns ({total_ms:,.3f} ms)")
+
 
         if base_name in consolidated_hists:
-            output_lines.append("\n  Combined On-CPU Duration Histogram:")
+            output_lines.append("\n\tCombined On-CPU Duration Histogram:")
             hist_data = consolidated_hists[base_name]
             max_count = max(hist_data.values()) if hist_data else 1
             
@@ -113,7 +120,8 @@ def main():
                 bar = '█' * int(40 * count / max_count)
                 start_str = format_size(start_val)
                 end_str = format_size(end_val)
-                output_lines.append(f"    [{start_str}, {end_str})".ljust(22) + f"{count:<10} |{bar}")
+                # Using tabs for indentation
+                output_lines.append(f"\t\t[{start_str}, {end_str})".ljust(22) + f"{count:<10} |{bar}")
 
     # --- Print to stdout ---
     # print("\n".join(output_lines))

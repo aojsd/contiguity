@@ -79,8 +79,8 @@ def main():
         sys.exit(1)
 
     # --- Data Processing ---
-    # Structure: {syscall_name: {tid: {"total_ns": val, "hist": [...]}}}
-    data = defaultdict(lambda: defaultdict(lambda: {"total_ns": 0, "hist": []}))
+    # NEW: Added "invocations" to the data structure
+    data = defaultdict(lambda: defaultdict(lambda: {"total_ns": 0, "hist": [], "invocations": 0}))
 
     # Regex to parse bpftrace map output with composite keys
     total_re = re.compile(r'^@cns\[(\d+), (\d+)\]:\s*(\d+)')
@@ -108,10 +108,12 @@ def main():
         # Match histogram data lines
         if current_syscall_name and current_tid:
             if m := hist_line_re.search(line):
-                start_str, end_str, count = m.groups()
+                start_str, end_str, count_str = m.groups()
+                count = int(count_str)
                 start_val = parse_size(start_str)
                 end_val = parse_size(end_str)
-                data[current_syscall_name][current_tid]["hist"].append((start_val, end_val, int(count)))
+                data[current_syscall_name][current_tid]["hist"].append((start_val, end_val, count))
+                data[current_syscall_name][current_tid]["invocations"] += count # NEW: Sum invocations from hist
                 continue
 
         # Reset context if a line doesn't match
@@ -140,7 +142,10 @@ def main():
 
             total_ns = stats["total_ns"]
             total_ms = total_ns / 1_000_000
+            invocations = stats["invocations"]
+
             output_lines.append(f"\tThread ID: {tid}")
+            output_lines.append(f"\t\tTotal Invocations: {invocations:,}")
             output_lines.append(f"\t\tTotal Time: {total_ns:,} ns ({total_ms:,.3f} ms)")
 
             if stats["hist"]:
