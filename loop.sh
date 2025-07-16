@@ -31,13 +31,28 @@ while true; do
     fi
 
     # Sleep briefly before checking again
-    sleep 0.5
+    sleep 0.1
 done
 
 # Found process
 echo "Monitoring contiguity of process $pid (name: $full_process_name)..." 1>&2
+
+# ================================================================
+# Live profilers - Interrupted in contiguity_trials.sh (SIGINT)
+# ================================================================
+# Attach perf to the process
 sudo perf stat -e instructions,L1-dcache-loads,L1-dcache-stores -p ${pid} -a &> ${TMP_DIR}/${process_name}.perf &
 
+# Profile kernel thread activity
+sudo ./kernel_work/kthread_cputime.bt > ${TMP_DIR}/${process_name}.kthread_cputime &
+
+# Track syscall activity
+sudo ./kernel_work/pid_syscalls.bt ${pid} > ${TMP_DIR}/${process_name}.syscalls &
+
+
+# =============================================
+# Contiguity tracking
+# =============================================
 # Fields: Time, n_regions, r75, r50, r25, Tracked RSS, Total RSS, n_mappings, list_mappings
 DIR=/home/michael/ISCA_2025_results/contiguity/
 echo "Time,Tracked-VSize,Tracked-RSS,Total-RSS,n_mappings,4K,8K,16K,32K,64K,128K,256K,512K,1M,2M,4M,8M,16M,32M,64M,128M,256M,512M,1G"

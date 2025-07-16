@@ -272,6 +272,14 @@ for i in $(seq 1 $1); do
 
         # End the khugepaged perf process
         ssh $2 "sudo pkill -2 -f perf"
+
+        # End kernel thread profiler (started in loop.sh)
+        ssh $2 "sudo pkill -2 -f kthread_cputime.bt"
+
+        # End syscall profiler (started in loop.sh)
+        ssh $2 "sudo pkill -2 -f pid_syscalls.bt"
+
+        # Wait for all background jobs to finish
         wait $(jobs -p)
 
         # End CPU Limit
@@ -310,6 +318,14 @@ for i in $(seq 1 $1); do
         # Wait for the run to finish
         wait $PIN_PID
         ssh $2 "sudo pkill -2 -f perf"
+        
+        # End kernel thread profiler (started in loop.sh)
+        ssh $2 "sudo pkill -2 -f kthread_cputime.bt"
+
+        # End syscall profiler (started in loop.sh)
+        ssh $2 "sudo pkill -2 -f pid_syscalls.bt"
+
+        # Wait for all background jobs to finish
         wait $(jobs -p)
 
         if [ "$TIME_DILATION" != "0" ]; then
