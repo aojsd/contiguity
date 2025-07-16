@@ -1,0 +1,16 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:raw_syscalls:sys_enter
+{
+    @start[tid] = nsecs;
+    @syscall[tid] = args->id;
+}
+
+tracepoint:raw_syscalls:sys_exit
+/@start[tid]/
+{
+    $syscall_nr = @syscall[tid];
+    @ns[$syscall_nr] = hist(nsecs - @start[tid]);
+    delete(@start[tid]);
+    delete(@syscall[tid]);
+}

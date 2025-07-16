@@ -1,0 +1,24 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:raw_syscalls:sys_enter
+/pid == $1/
+{
+    // We still use 'tid' to correctly track concurrent calls from
+    // different threads within the same process.
+    @start[tid] = nsecs;
+    @syscall[tid] = args->id;
+}
+
+tracepoint:raw_syscalls:sys_exit
+/@start[tid]/
+{
+    // The filter '/@start[tid]/' implicitly ensures we only
+    // trace threads belonging to the target PID we started
+    // tracking on entry.
+
+    $syscall_nr = @syscall[tid];
+    @ns[$syscall_nr] = hist(nsecs - @start[tid]);
+
+    delete(@start[tid]);
+    delete(@syscall[tid]);
+}
