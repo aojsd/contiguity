@@ -277,7 +277,7 @@ for i in $(seq 1 $1); do
         ssh $2 "sudo pkill -2 -f kthread_cputime.bt"
 
         # End syscall profiler (started in loop.sh)
-        ssh $2 "sudo pkill -2 -f pid_syscalls.bt"
+        ssh $2 "sudo pkill -2 -f pid_syscall_profiler.bt"
 
         # Wait for all background jobs to finish
         wait $(jobs -p)
@@ -323,7 +323,7 @@ for i in $(seq 1 $1); do
         ssh $2 "sudo pkill -2 -f kthread_cputime.bt"
 
         # End syscall profiler (started in loop.sh)
-        ssh $2 "sudo pkill -2 -f pid_syscalls.bt"
+        ssh $2 "sudo pkill -2 -f pid_syscall_profiler.bt"
 
         # Wait for all background jobs to finish
         wait $(jobs -p)

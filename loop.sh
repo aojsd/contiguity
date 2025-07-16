@@ -48,7 +48,7 @@ sudo perf stat -e instructions,L1-dcache-loads,L1-dcache-stores -p ${pid} -a &> 
 sudo ${CONT_DIR}/kernel_work/kthread_cputime.bt > ${TMP_DIR}/${process_name}.kthread_cputime &
 
 # Track syscall activity
-sudo ${CONT_DIR}/kernel_work/pid_syscalls.bt ${pid} > ${TMP_DIR}/${process_name}.syscalls &
+sudo ${CONT_DIR}/kernel_work/pid_syscall_profiler.bt ${pid} > ${TMP_DIR}/${process_name}.syscalls &
 
 
 # =============================================
