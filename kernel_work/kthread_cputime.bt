@@ -19,7 +19,13 @@ tracepoint:sched:sched_switch
 {
     $duration_ns = nsecs - @start[args->prev_pid];
     // printf("%s,%llu\n", args->prev_comm, $duration_ns);
+
+    // Build histogram of time slice durations
     @invocations[args->prev_comm] = hist($duration_ns);
+
+    // Sum total runtime for each thread
+    @total_runtime[args->prev_comm] = sum($duration_ns);
+
     delete(@start[args->prev_pid]);
 }
 
