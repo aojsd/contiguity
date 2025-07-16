@@ -1,378 +1,364 @@
-# Run trials of application using remote "run_pin.sh" script
-# Usage: ./contiguity_trials.sh <num_trials> <remote_host> <app> <output_dir> <pin_mode> <Other>
+#!/bin/bash
+
+# ==========================================================================================================
+# Script Functions
+# ==========================================================================================================
+
+# Prints the script's usage instructions.
+usage() {
+    echo "Usage: $0 <num_trials> <remote_host> <app> <output_dir> <pin_mode> [OPTIONS]"
+    echo "Runs benchmark trials on a remote host with extensive profiling."
+    echo
+    echo "Options:"
+    echo "  --NO_REBOOT              Do not reboot the machine between trials."
+    echo "  --TRACK_PIN              Track contiguity of memory allocated by Pin."
+    echo "  --THP <0|1>                Enable/disable Transparent Huge Pages (default: 1)."
+    echo "  --THP_SCAN <num>           Set pages_to_scan for khugepaged (default: 4096)."
+    echo "  --THP_SLEEP <ms>           Set scan_sleep_millisecs for khugepaged (default: 10000)."
+    echo "  --DIRTY <pages>            Set dirty_bytes in pages (default: 0)."
+    echo "  --CPU <%>                  Set CPU usage limit (e.g., 50.0) (default: 0)."
+    echo "  --TIME_DILATION <factor>   Set time dilation factor (default: 0)."
+    echo "  --FRAGMENT <GB>            Generate N gigabytes of memory fragmentation (default: 0)."
+    echo "  --NO_COMPACT             Disable memory compaction."
+    echo "  --ZERO_COMPACT           Set compaction proactiveness to 0."
+    echo "  --DIST                   Collect memory access distribution."
+    echo "  --RANDOM_FREELIST        Use random free list."
+    echo "  --LOOP_SLEEP <sec>         Sleep time for loop.sh (default: 5)."
+    echo "  --PIN \"<args>\"             Pass extra arguments to the Pin tool."
+}
+
+# Prepares the remote system for a single benchmark trial.
+# Arguments:
+#   $1: Remote host
+#   $2: Current trial number
+prepare_remote_system() {
+    local remote_host="$1"
+    local trial_num="$2"
+    
+    echo "--- Preparing remote system for trial ${trial_num} ---"
+
+    # Clear previous run data and create directories for the current trial
+    ssh "${remote_host}" "rm -rf /home/michael/ssd/scratch/*"
+    ssh "${remote_host}" "rm -rf /home/michael/ISCA_2025_results/tmp/*"
+    ssh "${remote_host}" "mkdir -p /home/michael/ssd/scratch/${APP}_tmp/"
+
+    # Reboot machine for a clean slate, unless disabled
+    if [ "$NO_REBOOT" != "1" ]; then
+        echo "Rebooting ${remote_host}..."
+        ssh "${remote_host}" "sudo reboot"
+        sleep 60
+    fi
+
+    # Fragment system if requested
+    if [ "$FRAGMENT" != "0" ]; then
+        echo "Generating ${FRAGMENT}GB of memory fragmentation..."
+        RANDOM_FREELIST=1 # Fragmentation implies random freelist
+        ssh "${remote_host}" "cd /home/michael/ISCA_2025_results/contiguity; ./kern_fragment.sh 1 ${FRAGMENT} 100"
+        ssh "${remote_host}" "cd /home/michael/ISCA_2025_results/contiguity; ./kern_fragment.sh 0"
+    fi
+    ssh "${remote_host}" "ISCA_2025_results/contiguity/random_freelist.sh ${RANDOM_FREELIST}"
+
+    # Apply system settings
+    echo "Applying kernel and system settings..."
+    if [ "$THP" == "1" ]; then
+        local thp_dir="/sys/kernel/mm/transparent_hugepage"
+        ssh "${remote_host}" "sudo sh -c 'echo always > ${thp_dir}/enabled'"
+        ssh "${remote_host}" "sudo sh -c 'echo ${THP_SCAN} > ${thp_dir}/khugepaged/pages_to_scan'"
+        ssh "${remote_host}" "sudo sh -c 'echo ${THP_SLEEP} > ${thp_dir}/khugepaged/scan_sleep_millisecs'"
+    fi
+    if [ "$DIRTY_BYTES" != "0" ]; then
+        ssh "${remote_host}" "sudo sh -c 'echo ${DIRTY_BYTES} > /proc/sys/vm/dirty_bytes'"
+        ssh "${remote_host}" "sudo sh -c 'echo $((DIRTY_BYTES >> 1)) > /proc/sys/vm/dirty_background_bytes'"
+    fi
+    if [ "$ZERO_COMPACT" == "1" ]; then
+        ssh "${remote_host}" "sudo sh -c 'echo 0 > /proc/sys/vm/compaction_proactiveness'"
+    fi
+    if [ "$NO_COMPACT" == "1" ]; then
+        ssh "${remote_host}" "sudo sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/defrag'"
+    fi
+
+    # Configure CPU limits via cgroup
+    CG=""
+    if [ "$CPU_LIMIT" != "0" ]; then
+        MAX_CPU=$(echo "$CPU_LIMIT 1000" | awk '{print $1 * $2}')
+        ssh "${remote_host}" "sudo mkdir -p /sys/fs/cgroup/pin"
+        ssh "${remote_host}" "sudo chmod o+w /sys/fs/cgroup/cgroup.procs /sys/fs/cgroup/pin/cgroup.procs"
+        CG="cgexec -g cpu:pin"
+    fi
+    if [ "$TIME_DILATION" != "0" ]; then
+        ssh "${remote_host}" "echo ${TIME_DILATION} | sudo tee /proc/sys/time_dilation/time_dilation" > /dev/null
+    fi
+    
+    # Apply other system-wide settings
+    ssh "${remote_host}" "sudo sh -c 'echo 0 > /proc/sys/kernel/nmi_watchdog'"
+    ssh "${remote_host}" "sudo sh -c 'echo 0 > /proc/sys/vm/swappiness'"
+    ssh "${remote_host}" "sudo swapoff -a"
+    ssh "${remote_host}" "sudo sh -c 'echo off > /sys/devices/system/cpu/smt/control'"
+    ssh "${remote_host}" "sudo chown michael /dev/hugepages"
+    ssh "${remote_host}" "sudo sh -c 'echo 1024 > /proc/sys/vm/nr_hugepages'"
+
+    # Start the consumer process for pitracer/nocache modes
+    if [ "$NOCACHE" == "1" ]; then
+        local c_dir="/home/michael/software/PiTracer/source/tools/PiTracer/consumer"
+        ssh "${remote_host}" "${c_dir}/consumer ${OUTP_DIR} ${CONSUMER_ZSTD}" &
+    fi
+    
+    # Drop caches right before the run
+    ssh "${remote_host}" "sudo /home/michael/ssd/drop_cache.sh"
+}
+
+
+# ==========================================================================================================
+# Main Script Logic
+# ==========================================================================================================
+
+# --- Default values for optional arguments ---
+THP=1;
+THP_SCAN=4096;
+THP_SLEEP=10000;
+DIRTY=0;
+CPU_LIMIT=0;
+TIME_DILATION=0;
+PIN_EXTRA="";
+LOOP_SLEEP=5;
+FRAGMENT=0;
+NO_REBOOT=0;
+NO_COMPACT=0;
+ZERO_COMPACT=0;
+DIST=0;
+TRACK_PIN=0;
+RANDOM_FREELIST=0;
+
+# --- Parse Command-Line Arguments ---
 if [ "$#" -lt 5 ]; then
-    echo "Usage: ./contiguity_trials.sh <num_trials> <remote_host> <app> <output_dir> <pin_mode> <Other>"
+    usage
     exit 1
 fi
 
-# Empty the remote scratch directory
-ssh $2 "rm -rf /home/michael/ssd/scratch/*"
+NUM_TRIALS=$1
+REMOTE_HOST=$2
+APP_NAME=$3
+OUTPUT_DIR=$4
+PIN_MODE=$5
+shift 5 # Consume the positional arguments
 
-# Ouput subdir: <output_dir>/<app>/<pin_mode>
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --NO_REBOOT)        NO_REBOOT=1; shift 1;;
+        --NO_COMPACT)       NO_COMPACT=1; shift 1;;
+        --ZERO_COMPACT)     ZERO_COMPACT=1; shift 1;;
+        --DIST)             DIST=1; shift 1;;
+        --TRACK_PIN)        TRACK_PIN=1; shift 1;;
+        --RANDOM_FREELIST)  RANDOM_FREELIST=1; shift 1;;
+        --THP)              THP="$2"; shift 2;;
+        --THP_SCAN)         THP_SCAN="$2"; shift 2;;
+        --THP_SLEEP)        THP_SLEEP="$2"; shift 2;;
+        --DIRTY)            DIRTY="$2"; shift 2;;
+        --CPU)              CPU_LIMIT="$2"; shift 2;;
+        --TIME_DILATION)    TIME_DILATION="$2"; shift 2;;
+        --FRAGMENT)         FRAGMENT="$2"; shift 2;;
+        --LOOP_SLEEP)       LOOP_SLEEP="$2"; shift 2;;
+        --PIN)              PIN_EXTRA="$2"; shift 2;;
+        -h|--help)          usage; exit 0;;
+        *)                  echo "Unknown option: $1" >&2; usage; exit 1;;
+    esac
+done
+
+# --- Initial Setup ---
+DIRTY_BYTES=$((DIRTY * 4096))
 CURR_DIR=$(pwd)
-OUTDIR=$CURR_DIR/$4/$3/$5
-APP_OUT_DIR=$OUTDIR/app
-DIST_OUT_DIR=$OUTDIR/dist
-THP_DIR=$OUTDIR/thp
-mkdir -p $APP_OUT_DIR
-mkdir -p $DIST_OUT_DIR
-mkdir -p $THP_DIR
+OUTDIR="${CURR_DIR}/${OUTPUT_DIR}/${APP_NAME}/${PIN_MODE}"
+APP_OUT_DIR="${OUTDIR}/app"
+DIST_OUT_DIR="${OUTDIR}/dist"
+THP_DIR="${OUTDIR}/thp"
+SYS_DIR="${OUTDIR}/sys"
+mkdir -p "$APP_OUT_DIR" "$DIST_OUT_DIR" "$THP_DIR" "$SYS_DIR"
 
-# Parse extra arguments
-eval "$(python3 src/python/bash_parser.py "${@:6}")"
-echo "Tracking Pin memory: ${TRACK_PIN}"
-echo "THP setting: ${THP}"
-echo "THP pages per scan: ${THP_SCAN}"
-echo "THP sleep timer: ${THP_SLEEP}"
-if [ "$ZERO_COMPACT" == "1" ]; then
-    echo "Compaction Proactiveness: 0"
-fi
-if [ "$NO_COMPACT" == "1" ]; then
-    echo "Memory Compaction: Disabled"
-fi
-echo "Dirty bytes setting (bytes): ${DIRTY}"
-echo "Dirty background bytes (bytes): ${DIRTY_BG}"
-echo "CPU usage limit: ${CPU_LIMIT}"
-echo "Time Dilation: ${TIME_DILATION}"
-echo "Loop initial sleep time: ${LOOP_SLEEP}"
-echo "Extra Pin arguments: ${PIN_EXTRA}"
-echo "Output directory: ${OUTDIR}"
 
-# Randomize the free list (or not)
-if [ "$FRAGMENT" != "0" ]; then
-    RANDOM_FREELIST=1
-fi
-ssh $2 "ISCA_2025_results/contiguity/random_freelist.sh $RANDOM_FREELIST"
-
-# Instruction distributions
-if [ "$DIST" == "1" ]; then
-    echo "Collecting access distribution"
-    DIST_FILE="-record_file /home/michael/ISCA_2025_results/tmp/${APP}.dist"
-else
-    DIST_FILE=""
-fi
-
-# If the app has a suffix "-XT", set THREADS to X (e.g, "-12T" sets THREADS=12)
-#  - Also retrieve the prefix before -XT
-if [[ $3 =~ ^(.+)-([0-9]+)T$ ]]; then
+# --- Application and Pin Mode Specific Setup ---
+if [[ $APP_NAME =~ ^(.+)-([0-9]+)T$ ]]; then
     NAME="${BASH_REMATCH[1]}"
     THREADS="${BASH_REMATCH[2]}"
 else
-    NAME=$3
+    NAME=$APP_NAME
 fi
 
-# Memcached sub-directories
-mkdir -p $OUTDIR
-if [[ $3 == mem* ]]; then
-    # Select memcached workload
-    if [[ "$3" == memA* ]]; then
-        WORKLOAD="workloada"
-    elif [[ "$3" == memB* ]]; then
-        WORKLOAD="workloadb"
-    elif [[ "$3" == memC* ]]; then
-        WORKLOAD="workloadc"
-    elif [[ "$3" == memW* ]]; then
-        WORKLOAD="workloadw"
-    elif [[ "$3" == memDY* ]]; then
-        WORKLOAD="workload_dynamic"
-    else
-        echo "Invalid memcached workload: $3"
-        exit 1
-    fi
-    # if threads is not blank, add suffix to app name, otherwise do not add the suffix
-    if [ -z "$THREADS" ]; then
-        APP="memcached"
-    else
+if [[ $APP_NAME == mem* ]]; then
+    case "$APP_NAME" in
+        memA*)  WORKLOAD="workloada";;
+        memB*)  WORKLOAD="workloadb";;
+        memC*)  WORKLOAD="workloadc";;
+        memW*)  WORKLOAD="workloadw";;
+        memDY*) WORKLOAD="workload_dynamic";;
+        *)      echo "Invalid memcached workload: $APP_NAME"; exit 1;;
+    esac
+
+    APP="memcached"
+    if [ -n "$THREADS" ]; then
         APP="memcached-${THREADS}T"
     fi
     NAME="memcached"
 else
-    APP=$3
+    APP=$APP_NAME
 fi
 
-# YCSB commands
-TARGET_IP=$(ssh -G $2 | awk '/^hostname/ { print $2 }')
+# YCSB commands (if needed)
+TARGET_IP=$(ssh -G "${REMOTE_HOST}" | awk '/^hostname/ { print $2 }')
 YCSB_ROOT=/home/michael/software/YCSB
 YCSB_HOST_ARGS="-p memcached.hosts=${TARGET_IP} -p memcached.port=11211 -p memcached.opTimeoutMillis=1000000"
 YCSB_ARGS="-s -threads 12 -p hdrhistogram.percentiles=90,99,99.9,99.99 ${YCSB_HOST_ARGS}"
 YCSB_LOAD="python2 ${YCSB_ROOT}/bin/ycsb load memcached -P ${YCSB_ROOT}/workloads/${WORKLOAD} ${YCSB_ARGS}"
 YCSB_RUN="python2 ${YCSB_ROOT}/bin/ycsb run memcached -P ${YCSB_ROOT}/workloads/${WORKLOAD} ${YCSB_ARGS}"
 
-# Copy run_pin.sh to remote machine
-scp /home/michael/ISCA_2025_results/run_pin.sh $2:/home/michael/ISCA_2025_results/run_pin.sh
-ssh $2 "chmod +x /home/michael/ISCA_2025_results/run_pin.sh"
-
-# Reset time dilation
-ssh $2 "~/reset_time_dilation.sh"
-
-# ==========================================================================================================
-# Select Pin mode
-# ==========================================================================================================
-# Check for IO-sleep mode
-PIN_ARGS=""
+# Pin Arguments
 OUTPREFIX="/home/michael/ssd/scratch/${APP}_tmp/${APP}"
 OUTP_DIR="/home/michael/ssd/scratch/${APP}_tmp"
-if [ "$5" == "native" ]; then
-    PIN_ARGS=""
-elif [ "$5" == "empty" ]; then
-    PIN_ARGS="-stage1 0 -bpages 16 ${PIN_EXTRA} ${DIST_FILE}"
-elif [ "$5" == "empty-sleep" ]; then
-    PIN_ARGS="-stage1 0 -bpages 16 -iosleep 1 ${PIN_EXTRA} ${DIST_FILE}"
-elif [ "$5" == "disk" ]; then
-    PIN_ARGS="-stage1 0 -bpages 16 -index_limit 20000 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
-elif [ "$5" == "disk-nocache" ]; then
-    PIN_ARGS="-comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
-    NOCACHE=1
-elif [ "$5" == "disk-largebuf" ]; then
-    PIN_ARGS="-stage1 0 -outprefix ${OUTPREFIX} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
-elif [ "$5" == "struct" ]; then
-    PIN_ARGS="-buf_type 0 -stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
-elif [ "$5" == "fields" ] || [ "$5" == "fields-sync" ]; then
-    PIN_ARGS="-stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
-elif [ "$5" == "fields-sync" ]; then
-    PIN_ARGS="-fsync 1 -stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
-elif [ "$5" == "pitracer" ]; then
-    PIN_ARGS="-comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
-    NOCACHE=1
-    CONSUMER_ZSTD=1
-else
-    echo "Invalid Pin mode: $5"
-    exit 1
+PIN_ARGS=""
+DIST_FILE=""
+if [ "$DIST" == "1" ]; then
+    DIST_FILE="-record_file /home/michael/ISCA_2025_results/tmp/${APP}.dist"
 fi
 
+case "$PIN_MODE" in
+    native)
+        PIN_ARGS=""
+        ;;
+    empty)
+        PIN_ARGS="-stage1 0 -bpages 16 ${PIN_EXTRA} ${DIST_FILE}"
+        ;;
+    empty-sleep)
+        PIN_ARGS="-stage1 0 -bpages 16 -iosleep 1 ${PIN_EXTRA} ${DIST_FILE}"
+        ;;
+    disk)
+        PIN_ARGS="-stage1 0 -bpages 16 -index_limit 20000 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        ;;
+    disk-nocache)
+        PIN_ARGS="-comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        NOCACHE=1
+        ;;
+    disk-largebuf)
+        PIN_ARGS="-stage1 0 -outprefix ${OUTPREFIX} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
+        ;;
+    struct)
+        PIN_ARGS="-buf_type 0 -stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        ;;
+    fields|fields-sync)
+        PIN_ARGS="-stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        ;;
+    fields-sync)
+        PIN_ARGS="-fsync 1 -stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        ;;
+    pitracer)
+        PIN_ARGS="-comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        NOCACHE=1
+        CONSUMER_ZSTD=1
+        ;;
+    *)
+        echo "Invalid Pin mode: $PIN_MODE"
+        exit 1
+        ;;
+esac
 
+# Copy run_pin.sh to remote machine
+scp /home/michael/ISCA_2025_results/run_pin.sh "${REMOTE_HOST}:/home/michael/ISCA_2025_results/"
+ssh "${REMOTE_HOST}" "chmod +x /home/michael/ISCA_2025_results/run_pin.sh"
 
 # ==========================================================================================================
-# Run trials
+# Run Trials
 # ==========================================================================================================
-# Reboot only once to capture how contiguity changes with each trial
-echo "Rebooting $2"
-ssh $2 "sudo reboot"
-sleep 60
+for i in $(seq 1 "$NUM_TRIALS"); do
+    echo "========================= Trial $i of ${NUM_TRIALS}: ${APP_NAME} (${PIN_MODE}) ========================="
 
-# Remove ptables directory
-ssh $2 "rm -rf /home/michael/ISCA_2025_results/tmp/ptables"
+    # 1. PREPARE the remote system
+    prepare_remote_system "$REMOTE_HOST" "$i"
 
-# Fragment system if FRAGMENT != 0
-if [ "$FRAGMENT" != "0" ]; then
-    ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./kern_fragment.sh 1 $FRAGMENT 100"
-    ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./kern_fragment.sh 0"
-fi
-
-# System settings
-if [ "$THP" == "1" ]; then
-    THP_KERNEL_DIR="/sys/kernel/mm/transparent_hugepage"
-    ssh $2 "sudo sh -c 'echo always > $THP_KERNEL_DIR/enabled'" > /dev/null
-    ssh $2 "sudo sh -c 'echo $THP_SCAN > $THP_KERNEL_DIR/khugepaged/pages_to_scan'" > /dev/null
-    ssh $2 "sudo sh -c 'echo $THP_SLEEP > $THP_KERNEL_DIR/khugepaged/scan_sleep_millisecs'" > /dev/null
-fi
-if [ "$DIRTY" != "0" ]; then
-    ssh $2 "sudo sh -c 'echo $DIRTY > /proc/sys/vm/dirty_bytes'" > /dev/null
-    ssh $2 "sudo sh -c 'echo $DIRTY_BG > /proc/sys/vm/dirty_background_bytes'" > /dev/null
-fi
-if [ "$ZERO_COMPACT" == "1" ]; then
-    ssh $2 "sudo sh -c 'echo 0 > /proc/sys/vm/compaction_proactiveness'" > /dev/null
-fi
-if [ "$NO_COMPACT" == "1" ]; then
-    ssh $2 "sudo sh -c echo never > /sys/kernel/mm/transparent_hugepage/defrag" > /dev/null
-fi
-
-# Speed settings
-if [ "$CPU_LIMIT" != "0" ]; then
-    # Set MAX_CPU = (CPU_LIMIT / 100 * 100000)
-    MAX_CPU=$(echo "$CPU_LIMIT 100000" | awk '{print $1 * $2 / 100}')
-
-    # Make cgroup for pin
-    ssh $2 "sudo mkdir /sys/fs/cgroup/pin"
-    ssh $2 "sudo chmod o+w /sys/fs/cgroup/cgroup.procs"
-    ssh $2 "sudo chmod o+w /sys/fs/cgroup/pin/cgroup.procs"
-
-    # To allow PIN to initialize, avoid setting the CPU limit here
-    # ssh $2 "echo "$MAX_CPU 100000" | sudo tee /sys/fs/cgroup/pin/cpu.max"
-
-    # Command to run pin in cgroup
-    CG="cgexec -g cpu:pin"
-fi
-if [ "$TIME_DILATION" != "0" ]; then
-    ssh $2 "echo $TIME_DILATION | sudo tee /proc/sys/time_dilation/time_dilation" > /dev/null
-fi
-
-
-# Always disable NMI watchdog
-ssh $2 "sudo sh -c 'echo 0 > /proc/sys/kernel/nmi_watchdog'"
-
-# Always set swappiness to 0
-ssh $2 "sudo sh -c 'echo 0 > /proc/sys/vm/swappiness'"
-
-# Disable swap
-ssh $2 "sudo swapoff -a"
-
-# Always disable hyperthreading
-ssh $2 "sudo sh -c 'echo off > /sys/devices/system/cpu/smt/control'"
-
-# Create temp directory for trace files
-ssh $2 "mkdir -p /home/michael/ssd/scratch/${APP}_tmp/"
-
-# For nocache runs:
-# - change permissions of /dev/hugepages
-# - reserve 512 hugepages
-# - start the consumer process
-ssh $2 "sudo chown michael /dev/hugepages"
-ssh $2 "sudo sh -c 'echo 1024 > /proc/sys/vm/nr_hugepages'"
-if [ "$NOCACHE" == "1" ]; then
-    C_DIR="/home/michael/software/PiTracer/source/tools/PiTracer/consumer"
-    ssh $2 "$C_DIR/consumer ${OUTP_DIR} ${CONSUMER_ZSTD}" &
-fi
-
-# Trials
-for i in $(seq 1 $1); do
-    echo "========================================================================================"
-    echo "$3: Trial $i"
-    echo "========================================================================================"
-
-    # Drop caches
-    ssh $2 "sudo /home/michael/ssd/drop_cache.sh"
-
-    # Set regions to -1 if tracking Pin memory (TRACK_PIN == 1)
+    # 2. RUN the benchmark and profilers
+    echo "--- Starting benchmark and profilers ---"
+    REGIONS=""
     if [ "$TRACK_PIN" == "1" ]; then
         REGIONS="-1"
     fi
-
-    # Start the contiguity script
-    ssh $2 "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/$5.txt" &
-
-    # For memcached, run YCSB on the local machine
-    if [[ $3 == mem* ]]; then
-        # Get khugepaged runtime using perf
-        ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep khugepaged) -a &> /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt" &
-        ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep kcompactd) -a &> /home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt" &
-
-        # Run memcached as a background process
-        ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
-
-        # Start CPU Limit
+    ssh "${REMOTE_HOST}" "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/${PIN_MODE}.txt" &
+    if [[ $APP_NAME == mem* ]]; then
+        # --- Memcached Path ---
+        ssh "${REMOTE_HOST}" "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
+        
         if [ "$CPU_LIMIT" != "0" ]; then
             sleep 5
-            ssh $2 "echo "$MAX_CPU 100000" | sudo tee /sys/fs/cgroup/pin/cpu.max"
+            ssh "${REMOTE_HOST}" "echo '${MAX_CPU} 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
         fi
-
-        # Run from YCSB root directory
-        DIR=$(pwd)
-        cd $YCSB_ROOT
-        # Load
-        $YCSB_LOAD 2>&1| grep -e "\[OVERALL\]" -e "\[READ\]" -e "\[UPDATE\]" -e "\[INSERT\]" -e "FAILED\]" | tee $APP_OUT_DIR/load_$i.out
-
-        # Get midway vm stats
-        ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_loaded_${APP}_$i.txt
-        $YCSB_RUN 2>&1| grep -e "\[OVERALL\]" -e "\[READ\]" -e "\[UPDATE\]" -e "\[INSERT\]" -e "FAILED\]" | tee $APP_OUT_DIR/run_$i.out
+        
+        cd "$YCSB_ROOT"
+        $YCSB_LOAD 2>&1 | grep -e "\[OVERALL\]" -e "\[READ\]" -e "\[UPDATE\]" -e "\[INSERT\]" -e "FAILED\]" | tee "$APP_OUT_DIR/load_$i.out"
+        ssh "${REMOTE_HOST}" "cat /proc/vmstat" > "$THP_DIR/vmstat_loaded_${APP}_$i.txt"
+        $YCSB_RUN 2>&1 | grep -e "\[OVERALL\]" -e "\[READ\]" -e "\[UPDATE\]" -e "\[INSERT\]" -e "FAILED\]" | tee "$APP_OUT_DIR/run_$i.out"
         cd - > /dev/null
-
-        # End the memcached server
-        ssh $2 "sudo pkill -2 -f /home/michael/software/memcached/memcached"
-
-        # End the khugepaged perf process
-        ssh $2 "sudo pkill -2 -f perf"
-
-        # End kernel thread profiler (started in loop.sh)
-        ssh $2 "sudo pkill -2 -f kthread_cputime.bt"
-
-        # End syscall profiler (started in loop.sh)
-        ssh $2 "sudo pkill -2 -f pid_syscall_profiler.bt"
-
-        # Wait for all background jobs to finish
-        wait $(jobs -p)
-
-        # End CPU Limit
-        if [ "$CPU_LIMIT" != "0" ]; then
-            ssh $2 "echo "100000 100000" | sudo tee /sys/fs/cgroup/pin/cpu.max"
-        fi
-        if [ "$TIME_DILATION" != "0" ]; then
-            ssh $2 "sudo sh -c 'echo 0 > /proc/sys/time_dilation/time_dilation'" > /dev/null
-        fi
-
-        # Get THP stats from /proc/vmstat
-        ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_${APP}_$i.txt
     else
-        # Execute the remote script, produces single output in ~/ISCA_2025_results/tmp/<app>.out
-        ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep khugepaged) -a &> /home/michael/ISCA_2025_results/tmp/khugepaged_${APP}_$i.txt" &
-        ssh $2 "sudo perf stat -e task-clock,cycles -p \$(pgrep kcompactd) -a &> /home/michael/ISCA_2025_results/tmp/kcompactd_${APP}_$i.txt" &
-        ssh $2 "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
+        # --- Generic Application Path ---
+        ssh "${REMOTE_HOST}" "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
         PIN_PID=$!
 
-        # Start CPU Limit
         if [ "$CPU_LIMIT" != "0" ]; then
             sleep 5
-            echo "Setting CPU limit to $MAX_CPU after 600s"
-            ssh $2 "echo "$MAX_CPU 100000" | sudo tee /sys/fs/cgroup/pin/cpu.max"
+            ssh "${REMOTE_HOST}" "echo '${MAX_CPU} 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
         fi
 
-        # For mid-way vm stats, take a snapshot at 10s for empty and native configurations. Snapshot at 5min for disk configurations.
-        if [[ $5 == *"disk"* ]] || [[ $5 == *"fields"* ]] || [[ $5 == *"sleep"* ]]; then
+        if [[ $PIN_MODE == *"disk"* ]] || [[ $PIN_MODE == *"fields"* ]] || [[ $PIN_MODE == *"sleep"* ]]; then
             sleep 300
-            ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_loaded_${APP}_$i.txt
         else
             sleep 10
-            ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_loaded_${APP}_$i.txt
         fi
-
-        # Wait for the run to finish
-        wait $PIN_PID
-        ssh $2 "sudo pkill -2 -f perf"
+        ssh "${REMOTE_HOST}" "cat /proc/vmstat" > "$THP_DIR/vmstat_loaded_${APP}_$i.txt"
         
-        # End kernel thread profiler (started in loop.sh)
-        ssh $2 "sudo pkill -2 -f kthread_cputime.bt"
+        wait $PIN_PID
+    fi
+    ssh "${REMOTE_HOST}" "cat /proc/vmstat" > "$THP_DIR/vmstat_${APP}_$i.txt"
+    echo "--- Benchmark finished ---"
 
-        # End syscall profiler (started in loop.sh)
-        ssh $2 "sudo pkill -2 -f pid_syscall_profiler.bt"
+    # 3. CLEAN UP remote processes
+    echo "--- Halting remote processes ---"
+    if [[ $APP_NAME == mem* ]]; then
+        ssh "${REMOTE_HOST}" "sudo pkill -2 -f /home/michael/software/memcached/memcached"
+    fi
+    ssh "${REMOTE_HOST}" "sudo pkill -2 -f perf"
+    ssh "${REMOTE_HOST}" "sudo pkill -2 -f kthread_cputime.bt"
+    ssh "${REMOTE_HOST}" "sudo pkill -2 -f pid_syscall_profiler.bt"
+    wait $(jobs -p) # Wait for all local background jobs (like ssh) to finish
 
-        # Wait for all background jobs to finish
-        wait $(jobs -p)
-
-        if [ "$TIME_DILATION" != "0" ]; then
-            ssh $2 "sudo sh -c 'echo 0 > /proc/sys/time_dilation/time_dilation'" > /dev/null
-        fi
-
-        # Get THP stats from /proc/vmstat
-        ssh $2 "cat /proc/vmstat" > $THP_DIR/vmstat_${APP}_$i.txt
+    if [ "$CPU_LIMIT" != "0" ]; then
+        ssh "${REMOTE_HOST}" "echo '100000 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
+    fi
+    if [ "$TIME_DILATION" != "0" ]; then
+        ssh "${REMOTE_HOST}" "sudo sh -c 'echo 0 > /proc/sys/time_dilation/time_dilation'" > /dev/null
     fi
 
-    # Count number of times page table mappings changed - append to <app>_i.perf
-    P_SRC="/home/michael/ISCA_2025_results/contiguity/src/python"
-    ssh $2 "python3 $P_SRC/check_ptables.py /home/michael/ISCA_2025_results/tmp/ptables >> /home/michael/ISCA_2025_results/tmp/${NAME}.perf"
-
-    # Print size of trace directory
-    ssh $2 "du -sh /home/michael/ssd/scratch/${APP}_tmp/"
-    ssh $2 "rm -rf /home/michael/ssd/scratch/${APP}_tmp"
-    ssh $2 "mkdir -p /home/michael/ssd/scratch/${APP}_tmp/"
-
-    # Copy the output to the local machine, renaming it to include the trial number
+    # 4. COLLECT & PROCESS results
+    echo "--- Collecting and processing results ---"
+    P_SRC_CONTIG="/home/michael/ISCA_2025_results/contiguity/src/python"
+    ssh "${REMOTE_HOST}" "python3 ${P_SRC_CONTIG}/check_ptables.py /home/michael/ISCA_2025_results/tmp/ptables >> /home/michael/ISCA_2025_results/tmp/${NAME}.perf"
+    
+    ssh "${REMOTE_HOST}" "echo -n 'Trace directory size: '; du -sh /home/michael/ssd/scratch/${APP}_tmp/"
+    
     TMP_DIR="/home/michael/ISCA_2025_results/tmp"
-    scp $2:$TMP_DIR/$5.txt                      $OUTDIR/$5_$i.txt
-    scp $2:$TMP_DIR/${APP}.out                  $APP_OUT_DIR/${APP}_$i.out
-    scp $2:$TMP_DIR/khugepaged_${APP}_$i.txt    $THP_DIR/khugepaged_${APP}_$i.txt
-    scp $2:$TMP_DIR/kcompactd_${APP}_$i.txt     $THP_DIR/kcompactd_${APP}_$i.txt
-    scp $2:$TMP_DIR/${NAME}.perf                $APP_OUT_DIR/${APP}_$i.perf
-    scp $2:$TMP_DIR/${NAME}.kthread_cputime     $APP_OUT_DIR/${APP}_$i.kthread_cputime
-    scp $2:$TMP_DIR/${NAME}.syscalls            $APP_OUT_DIR/${APP}_$i.syscalls
+    scp "${REMOTE_HOST}:${TMP_DIR}/${PIN_MODE}.txt"              "${OUTDIR}/${PIN_MODE}_${i}.txt"
+    scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.out"                   "${APP_OUT_DIR}/${APP}_${i}.out"
+    scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.perf"                 "${APP_OUT_DIR}/${APP}_${i}.perf"
+    scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.kthread_cputime"      "${SYS_DIR}/${APP}_${i}.kthread_cputime"
+    scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.syscalls"             "${SYS_DIR}/${APP}_${i}.syscalls"
     if [ "$DIST" == "1" ]; then
-        scp $2:$TMP_DIR/${APP}.dist             $DIST_OUT_DIR/dist_$3_$i.txt
-        ssh $2 "rm $TMP_DIR/${APP}.dist"
+        scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.dist" "${DIST_OUT_DIR}/dist_${APP_NAME}_${i}.txt"
     fi
-    ssh $2 "rm $TMP_DIR/$5.txt"
-    ssh $2 "rm $TMP_DIR/${APP}.out"
-    ssh $2 "rm $TMP_DIR/khugepaged_${APP}_$i.txt"
-    ssh $2 "rm $TMP_DIR/kcompactd_${APP}_$i.txt"
-    ssh $2 "rm $TMP_DIR/${NAME}.perf"
-    ssh $2 "rm $TMP_DIR/${NAME}.kthread_cputime"
-    ssh $2 "rm $TMP_DIR/${NAME}.syscalls"
+    
+    rm -rf "${OUTDIR}/ptables_${i}"
+    ssh "${REMOTE_HOST}" "rm -f /home/michael/ISCA_2025_results/tmp/ptables/pagemap"
+    scp -r "${REMOTE_HOST}:/home/michael/ISCA_2025_results/tmp/ptables" "${OUTDIR}/ptables_${i}"
+    
+    P_SRC_KWORK="/home/michael/ISCA_2025_results/contiguity/kernel_work/python"
+    python3 "${P_SRC_KWORK}/kthread_parse.py" "${SYS_DIR}/${APP}_${i}.kthread_cputime"
+    python3 "${P_SRC_KWORK}/syscall_parse.py" "${SYS_DIR}/${APP}_${i}.syscalls"
 
-    # Copy page tables
-    # Overwrite
-    rm -rf $OUTDIR/ptables_$i
-    ssh $2 "rm /home/michael/ISCA_2025_results/tmp/ptables/pagemap"
-    scp -r $2:/home/michael/ISCA_2025_results/tmp/ptables $OUTDIR/ptables_$i
-    ssh $2 "rm -rf /home/michael/ISCA_2025_results/tmp/ptables"
+    # 5. FINAL cleanup for the trial
+    ssh "${REMOTE_HOST}" "rm -rf /home/michael/ssd/scratch/${APP}_tmp"
 done
 
-# Clean up temp directory
-ssh $2 "rm -rf /home/michael/ssd/scratch/${APP}_tmp"
+echo "========================= All trials completed. ========================="
