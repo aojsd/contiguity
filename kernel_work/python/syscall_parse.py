@@ -70,6 +70,7 @@ def main():
         sys.exit(1)
 
     input_file = sys.argv[1]
+    summary_file = input_file + ".summary" # NEW: Define summary file name
 
     try:
         with open(input_file, 'r') as f:
@@ -113,72 +114,82 @@ def main():
                 start_val = parse_size(start_str)
                 end_val = parse_size(end_str)
                 data[current_syscall_name][current_tid]["hist"].append((start_val, end_val, count))
-                data[current_syscall_name][current_tid]["invocations"] += count # NEW: Sum invocations from hist
+                data[current_syscall_name][current_tid]["invocations"] += count
                 continue
 
         # Reset context if a line doesn't match
         current_syscall_name = None
         current_tid = None
 
+    # --- Aggregate Data for Sorting and Summary ---
+    syscall_summary = defaultdict(lambda: {"total_ns": 0, "invocations": 0})
+    for syscall_name, threads in data.items():
+        for tid, stats in threads.items():
+            syscall_summary[syscall_name]["total_ns"] += stats["total_ns"]
+            syscall_summary[syscall_name]["invocations"] += stats["invocations"]
 
-    # --- Generate Formatted Output ---
-    output_lines = []
-    pid = " (PID from file)" # Placeholder, as we don't know the PID from the file
+    # NEW: Sort syscalls by their aggregated total time
+    sorted_syscalls = sorted(syscall_summary.items(), key=lambda item: item[1]["total_ns"], reverse=True)
 
-    output_lines.append(f"--- Syscall Latency Report{pid} ---")
 
-    # Sort by syscall name for consistent output
-    for syscall_name, threads in sorted(data.items()):
+    # --- Generate Formatted Output for Detailed File ---
+    output_lines = [f"--- Syscall Latency Report (Sorted by Total Time) ---"]
+    for syscall_name, _ in sorted_syscalls:
+        threads = data[syscall_name]
+        n_threads = len(threads)
         output_lines.append("\n" + "="*60)
-        output_lines.append(f"Syscall: {syscall_name}")
+        output_lines.append(f"Syscall: {syscall_name} ({n_threads} thread(s))")
         output_lines.append("="*60)
 
         is_first_thread = True
-        # Sort by thread ID
         for tid, stats in sorted(threads.items(), key=lambda item: int(item[0])):
-            # Add a newline separator for all but the first thread in the group
             if not is_first_thread:
                 output_lines.append("")
-
             total_ns = stats["total_ns"]
             total_ms = total_ns / 1_000_000
             invocations = stats["invocations"]
-
             output_lines.append(f"\tThread ID: {tid}")
             output_lines.append(f"\t\tTotal Invocations: {invocations:,}")
             output_lines.append(f"\t\tTotal Time: {total_ns:,} ns ({total_ms:,.3f} ms)")
-
             if stats["hist"]:
                 output_lines.append("\t\tLatency Histogram (ns):")
                 hist_data = sorted(stats["hist"])
                 max_count = max(c for _, _, c in hist_data) if hist_data else 1
-
                 for start_val, end_val, count in hist_data:
                     bar = '█' * int(40 * count / max_count)
-                    start_str = format_size(start_val)
-                    end_str = format_size(end_val)
-                    
-                    # Build the label part with space-based padding for alignment
-                    label = f"[{start_str}, {end_str})".ljust(20)
-                    
-                    # Prepend tabs for indentation, then add the aligned content
+                    label = f"[{format_size(start_val)}, {format_size(end_val)})".ljust(20)
                     line = f"\t\t\t{label}{count:<10} |{bar}"
                     output_lines.append(line)
-            
             is_first_thread = False
 
-    # --- Print to stdout ---
-    # print("\n".join(output_lines))
+    # --- Generate Formatted Output for Summary File ---
+    summary_lines = ["--- Aggregated Syscall Report (Sorted by Total Time) ---"]
+    summary_lines.append("\n{:<20} {:>20} {:>25}".format("SYSCALL", "TOTAL INVOCATIONS", "TOTAL TIME (ms)"))
+    summary_lines.append("-" * 68)
+    for syscall_name, summary_stats in sorted_syscalls:
+        total_inv = summary_stats["invocations"]
+        total_time_ms = summary_stats["total_ns"] / 1_000_000
+        summary_lines.append("{:<20} {:>20,} {:>25,.3f}".format(syscall_name, total_inv, total_time_ms))
 
-    # --- Overwrite Original File ---
+
+    # --- Overwrite Original File and Write Summary File ---
     try:
+        # Write detailed per-thread file
         with open(input_file, 'w') as f:
             f.write("\n".join(output_lines))
             f.write("\n")
-        print(f"✅ Success! File '{input_file}' was overwritten with the report.")
+        print(f"✅ Success! Detailed report overwritten to '{input_file}'.")
+        
+        # Write aggregated summary file
+        with open(summary_file, 'w') as f:
+            f.write("\n".join(summary_lines))
+            f.write("\n")
+        print(f"✅ Success! Aggregated summary written to '{summary_file}'.")
+
     except IOError as e:
-        print(f"Error: Could not write to file '{input_file}'.\n{e}", file=sys.stderr)
+        print(f"Error: Could not write to file.\n{e}", file=sys.stderr)
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

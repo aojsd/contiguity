@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# A script to parse and consolidate bpftrace output from a file.
+# A script to parse and consolidate kernel thread data from a file.
 # It reads from the specified file, processes the data, and then
 # overwrites the file with the consolidated summary.
 #
@@ -95,18 +95,19 @@ def main():
                 consolidated_invocations[current_hist_base_name] += count
 
     # --- Generate Formatted Output ---
-    output_lines = ["--- Consolidated Kernel Thread On-CPU Time ---"]
+    output_lines = ["--- Consolidated Kernel Thread On-CPU Time (Sorted by Total Time) ---"]
 
-    for base_name in sorted(consolidated_totals.keys()):
-        total_ns = consolidated_totals[base_name]
+    # NEW: Sort by total time (the value) in descending order
+    sorted_thread_groups = sorted(consolidated_totals.items(), key=lambda item: item[1], reverse=True)
+
+    for base_name, total_ns in sorted_thread_groups:
         total_ms = total_ns / 1_000_000
         num_threads = len(consolidated_threads[base_name])
         invocations = consolidated_invocations[base_name]
 
-        output_lines.append("\n" + "="*40)
-        # Modified to match the user's previous format
-        output_lines.append(f" Thread Group: {base_name} ({num_threads} threads)")
-        output_lines.append("="*40)
+        output_lines.append("\n" + "="*60)
+        output_lines.append(f"Thread Group: {base_name} ({num_threads} thread(s))")
+        output_lines.append("="*60)
         output_lines.append(f"\tTotal Invocations: {invocations:,}")
         output_lines.append(f"\tTotal Combined On-CPU Time: {total_ns:,} ns ({total_ms:,.3f} ms)")
 
@@ -118,13 +119,8 @@ def main():
             
             for (start_val, end_val), count in sorted(hist_data.items()):
                 bar = '█' * int(40 * count / max_count)
-                start_str = format_size(start_val)
-                end_str = format_size(end_val)
-                # Using tabs for indentation
-                output_lines.append(f"\t\t[{start_str}, {end_str})".ljust(22) + f"{count:<10} |{bar}")
-
-    # --- Print to stdout ---
-    # print("\n".join(output_lines))
+                label = f"[{format_size(start_val)}, {format_size(end_val)})".ljust(20)
+                output_lines.append(f"\t\t{label}{count:<10} |{bar}")
 
     # --- Overwrite Original File ---
     try:
