@@ -173,8 +173,8 @@ fi
 
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk-nocache "${ARG_ARRAY[@]}"
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk "${ARG_ARRAY[@]}"
-./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR "disk-largebuf" "${ARG_ARRAY[@]}"
-./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR "empty-sleep" "${ARG_ARRAY[@]}"
+# ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR "disk-largebuf" "${ARG_ARRAY[@]}"
+# ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR "empty-sleep" "${ARG_ARRAY[@]}"
 
 set +x
 echo "--- All runs complete. ---"
