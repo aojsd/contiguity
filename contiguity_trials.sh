@@ -171,8 +171,9 @@ OUTDIR="${CURR_DIR}/${OUTPUT_DIR}/${APP_NAME}/${PIN_MODE}"
 APP_OUT_DIR="${OUTDIR}/app"
 DIST_OUT_DIR="${OUTDIR}/dist"
 THP_DIR="${OUTDIR}/thp"
+PTABLE_DIR="${OUTDIR}/ptables"
 SYS_DIR="${OUTDIR}/sys"
-mkdir -p "$APP_OUT_DIR" "$DIST_OUT_DIR" "$THP_DIR" "$SYS_DIR"
+mkdir -p "$APP_OUT_DIR" "$DIST_OUT_DIR" "$THP_DIR" "$SYS_DIR" "$PTABLE_DIR"
 
 
 # --- Application and Pin Mode Specific Setup ---
@@ -340,22 +341,22 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     ssh "${REMOTE_HOST}" "echo -n 'Trace directory size: '; du -sh /home/michael/ssd/scratch/${APP}_tmp/"
     
     TMP_DIR="/home/michael/ISCA_2025_results/tmp"
-    scp "${REMOTE_HOST}:${TMP_DIR}/${PIN_MODE}.txt"              "${OUTDIR}/${PIN_MODE}_${i}.txt"
-    scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.out"                   "${APP_OUT_DIR}/${APP}_${i}.out"
-    scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.perf"                 "${APP_OUT_DIR}/${APP}_${i}.perf"
-    scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.kthread_cputime"      "${SYS_DIR}/${APP}_${i}.kthread_cputime"
-    scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.syscalls"             "${SYS_DIR}/${APP}_${i}.syscalls"
+    scp "${REMOTE_HOST}:${TMP_DIR}/${PIN_MODE}.txt"              "${OUTDIR}/${APP}_${PIN_MODE}_${i}.txt"
+    scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.out"                   "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}.out"
+    scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.perf"                 "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}.perf"
+    scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.kthread_cputime"      "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.kthread_cputime"
+    scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.syscalls"             "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.syscalls"
     if [ "$DIST" == "1" ]; then
-        scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.dist" "${DIST_OUT_DIR}/dist_${APP_NAME}_${i}.txt"
+        scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.dist" "${DIST_OUT_DIR}/${APP}_${PIN_MODE}_dist_${i}.txt"
     fi
     
     rm -rf "${OUTDIR}/ptables_${i}"
     ssh "${REMOTE_HOST}" "rm -f /home/michael/ISCA_2025_results/tmp/ptables/pagemap"
-    scp -r "${REMOTE_HOST}:/home/michael/ISCA_2025_results/tmp/ptables" "${OUTDIR}/ptables_${i}"
+    scp -r "${REMOTE_HOST}:/home/michael/ISCA_2025_results/tmp/ptables" "${PTABLE_DIR}/ptables_${i}"
     
     P_SRC_KWORK="/home/michael/ISCA_2025_results/contiguity/kernel_work/python"
-    python3 "${P_SRC_KWORK}/kthread_parse.py" "${SYS_DIR}/${APP}_${i}.kthread_cputime"
-    python3 "${P_SRC_KWORK}/syscall_parse.py" "${SYS_DIR}/${APP}_${i}.syscalls"
+    python3 "${P_SRC_KWORK}/kthread_parse.py" "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.kthread_cputime"
+    python3 "${P_SRC_KWORK}/syscall_parse.py" "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.syscalls"
 
     # 5. FINAL cleanup for the trial
     ssh "${REMOTE_HOST}" "rm -rf /home/michael/ssd/scratch/${APP}_tmp"
