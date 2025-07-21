@@ -28,8 +28,31 @@ sudo perf stat -e instructions,L1-dcache-loads,L1-dcache-stores -p ${pid} -a &> 
 # Profile kernel thread activity
 sudo ${CONT_DIR}/kernel_work/kthread_cputime.bt > ${TMP_DIR}/${process_name}.kthread_cputime &
 
-# Track syscall activity
-sudo ${CONT_DIR}/kernel_work/pid_syscall_profiler.bt ${pid} > ${TMP_DIR}/${process_name}.syscalls &
+# =================================================
+# Track activity of ONLY APPLICATION SYSCALLS
+# =================================================
+echo "Parsing memory maps for PID $PIN_PID..."
+MAPS=$(cat /proc/$PIN_PID/maps)
+
+PIN_RANGE=$(echo "$MAPS" | grep 'pinbin' | grep 'r-xp' | head -n 1 | awk -F'[- ]' '{print "0x"$1, "0x"$2}')
+TOOL_RANGE=$(echo "$MAPS" | grep 'pitracer.so' | grep 'r-xp' | head -n 1 | awk -F'[- ]' '{print "0x"$1, "0x"$2}')
+
+if [ -z "$PIN_RANGE" ] || [ -z "$TOOL_RANGE" ]; then
+    echo "Error: Could not find memory ranges for pinbin or the pintool."
+    kill $PIN_PID
+    exit 1
+fi
+
+PIN_START=$(echo $PIN_RANGE | awk '{print $1}')
+PIN_END=$(echo $PIN_RANGE | awk '{print $2}')
+TOOL_START=$(echo $TOOL_RANGE | awk '{print $1}')
+TOOL_END=$(echo $TOOL_RANGE | awk '{print $2}')
+
+echo "  pinbin range:   $PIN_START - $PIN_END"
+echo "  pitracer range: $TOOL_START - $TOOL_END"
+
+sudo ${CONT_DIR}/kernel_work/pid_syscall_profiler.bt ${pid} $PIN_START $PIN_END $TOOL_START $TOOL_END
+        > ${TMP_DIR}/${process_name}.syscalls &
 
 
 # =============================================

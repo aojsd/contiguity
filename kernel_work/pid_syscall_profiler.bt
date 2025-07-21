@@ -1,11 +1,29 @@
 #!/usr/bin/env bpftrace
 
+/*
+ * This script now accepts at least 5 arguments:
+ * $1: PID to trace
+ * $2: pinbin_start_addr (start address of pinbin region)
+ * $3: pinbin_end_addr   (end address of pinbin region)
+ * $4: tool_start_addr   (start address of the pintool .so region)
+ * $5: tool_end_addr     (end address of the pintool .so region)
+ *
+ * Example: sudo ./pid_syscall_profiler.bt 12345 0x7f... 0x7f... 0x7f... 0x7f...
+ */
+
 tracepoint:raw_syscalls:sys_enter
 /pid == $1/
 {
+    // Exclude syscalls originating from the Pin runtime or the pintool itself.
+    $ip = reg("ip");
+    if (($ip >= $2 && $ip < $3) || ($ip >= $4 && $ip < $5)) {
+        // Instruction pointer is inside a tool region, so we skip it.
+        return;
+    }
+
     // We still use 'tid' to correctly track concurrent calls from
     // different threads within the same process.
-    @start[tid] = nsecs;
+    [cite_start]@start[tid] = nsecs; [cite: 2]
     @syscall[tid] = args->id;
 }
 
@@ -13,17 +31,14 @@ tracepoint:raw_syscalls:sys_exit
 /@start[tid]/
 {
     // The filter '/@start[tid]/' implicitly ensures we only
-    // trace threads belonging to the target PID we started
-    // tracking on entry.
-
-    $duration = nsecs - @start[tid];
+    // trace threads we started tracking on entry.
+    [cite_start]$duration = nsecs - @start[tid]; [cite: 3]
     $syscall_nr = @syscall[tid];
 
     // Latency histogram per syscall, per thread
     @ns[$syscall_nr, tid] = hist($duration);
-
     // Sum of time spent per syscall, per thread
-    @cns[$syscall_nr, tid] = sum($duration);
+    [cite_start]@cns[$syscall_nr, tid] = sum($duration); [cite: 4]
 
     delete(@start[tid]);
     delete(@syscall[tid]);
