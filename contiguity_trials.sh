@@ -1,31 +1,14 @@
 #!/bin/bash
 
+# Get the absolute path to the directory where this script is located.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+
+# Source the shared configuration file using the absolute path.
+source "${SCRIPT_DIR}/.arg_parsing.sh"
+
 # ==========================================================================================================
 # Script Functions
 # ==========================================================================================================
-
-# Prints the script's usage instructions.
-usage() {
-    echo "Usage: $0 <num_trials> <remote_host> <app> <output_dir> <pin_mode> [OPTIONS]"
-    echo "Runs benchmark trials on a remote host with extensive profiling."
-    echo
-    echo "Options:"
-    echo "  --NO_REBOOT              Do not reboot the machine between trials."
-    echo "  --TRACK_PIN              Track contiguity of memory allocated by Pin."
-    echo "  --THP <0|1>                Enable/disable Transparent Huge Pages (default: 1)."
-    echo "  --THP_SCAN <num>           Set pages_to_scan for khugepaged (default: 4096)."
-    echo "  --THP_SLEEP <ms>           Set scan_sleep_millisecs for khugepaged (default: 10000)."
-    echo "  --DIRTY <pages>            Set dirty_bytes in pages (default: 0)."
-    echo "  --CPU <%>                  Set CPU usage limit (e.g., 50.0) (default: 0)."
-    echo "  --TIME_DILATION <factor>   Set time dilation factor (default: 0)."
-    echo "  --FRAGMENT <GB>            Generate N gigabytes of memory fragmentation (default: 0)."
-    echo "  --NO_COMPACT             Disable memory compaction."
-    echo "  --ZERO_COMPACT           Set compaction proactiveness to 0."
-    echo "  --DIST                   Collect memory access distribution."
-    echo "  --RANDOM_FREELIST        Use random free list."
-    echo "  --LOOP_SLEEP <sec>         Sleep time for loop.sh (default: 5)."
-    echo "  --PIN \"<args>\"             Pass extra arguments to the Pin tool."
-}
 
 # Prepares the remote system for a single benchmark trial.
 # Arguments:
@@ -112,29 +95,21 @@ prepare_remote_system() {
 # Main Script Logic
 # ==========================================================================================================
 
-# --- Default values for optional arguments ---
-THP=1;
-THP_SCAN=4096;
-THP_SLEEP=10000;
-DIRTY=0;
-CPU_LIMIT=0;
-TIME_DILATION=0;
-PIN_EXTRA="";
-LOOP_SLEEP=5;
-FRAGMENT=0;
-NO_REBOOT=0;
-NO_COMPACT=0;
-ZERO_COMPACT=0;
-DIST=0;
-TRACK_PIN=0;
-RANDOM_FREELIST=0;
+# Check for help flag
+for arg in "$@"; do
+    if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
+        usage "" "full"
+        exit 0
+    fi
+done
 
 # --- Parse Command-Line Arguments ---
 if [ "$#" -lt 5 ]; then
-    usage
+    usage "contiguity_trials" "brief"
     exit 1
 fi
 
+# --- Parse Positional Arguments ---
 NUM_TRIALS=$1
 REMOTE_HOST=$2
 APP_NAME=$3
@@ -142,27 +117,12 @@ OUTPUT_DIR=$4
 PIN_MODE=$5
 shift 5 # Consume the positional arguments
 
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        --NO_REBOOT)        NO_REBOOT=1; shift 1;;
-        --NO_COMPACT)       NO_COMPACT=1; shift 1;;
-        --ZERO_COMPACT)     ZERO_COMPACT=1; shift 1;;
-        --DIST)             DIST=1; shift 1;;
-        --TRACK_PIN)        TRACK_PIN=1; shift 1;;
-        --RANDOM_FREELIST)  RANDOM_FREELIST=1; shift 1;;
-        --THP)              THP="$2"; shift 2;;
-        --THP_SCAN)         THP_SCAN="$2"; shift 2;;
-        --THP_SLEEP)        THP_SLEEP="$2"; shift 2;;
-        --DIRTY)            DIRTY="$2"; shift 2;;
-        --CPU)              CPU_LIMIT="$2"; shift 2;;
-        --TIME_DILATION)    TIME_DILATION="$2"; shift 2;;
-        --FRAGMENT)         FRAGMENT="$2"; shift 2;;
-        --LOOP_SLEEP)       LOOP_SLEEP="$2"; shift 2;;
-        --PIN)              PIN_EXTRA="$2"; shift 2;;
-        -h|--help)          usage; exit 0;;
-        *)                  echo "Unknown option: $1" >&2; usage; exit 1;;
-    esac
-done
+# --- Parse Optional Arguments ---
+parse_trial_args "$@"
+if [ $? -eq 1 ]; then
+    usage "contiguity_trials" "full"
+    exit 0
+fi
 
 # --- Initial Setup ---
 DIRTY_BYTES=$((DIRTY * 4096))
