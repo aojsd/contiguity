@@ -177,7 +177,7 @@ prepare_remote_system() {
     post_reboot_cmds+="echo 0 | sudo tee /proc/sys/kernel/randomize_va_space > /dev/null; "
 
     # Insert sleep dilation kernel module
-    post_reboot_cmds+="sudo insmod ${CONTIGUITY}/sleep_dilation/sleep_dilation.ko; "
+    post_reboot_cmds+="sudo insmod ${CONTIGUITY}/kernel_work/sleep_dilation/sleep_dilation.ko; "
 
     # Drop caches right before the run
     post_reboot_cmds+="sudo /home/michael/ssd/drop_cache.sh;"
@@ -391,7 +391,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
         wait ${TAIL_PID}
     fi
     ssh "${REMOTE_HOST}" "cat /proc/vmstat" > "$THP_DIR/vmstat_${APP}_$i.txt"
-    echo "\n--- Benchmark finished ---"
+    echo "--- Benchmark finished ---"
 
     # 3. CLEAN UP remote processes
     echo "--- Halting remote processes ---"
