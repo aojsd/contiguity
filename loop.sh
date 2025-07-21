@@ -1,41 +1,44 @@
 #!/bin/bash
-# Take process name, waits for a process containing this name has over 50% CPU usage
-if [ $# -lt 1 ]; then
-    echo "Usage: $0 <process_name> [max_regions]"
+# Take pid, process name, waits for a process containing this name has over 50% CPU usage
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <pid> <process_name_for_logs> [max_regions]"
     exit 1
 fi
 TMP_DIR=/home/michael/ISCA_2025_results/tmp
 CONT_DIR=/home/michael/ISCA_2025_results/contiguity
 
-# Name to match
-process_name="$1"
-cpu_threshold=25.0  # Define the minimum CPU usage percentage
+# Args
+pid="$1"
+process_name="$2"
+max_regions="$3"
+# cpu_threshold=25.0  # Define the minimum CPU usage percentage
 
-echo "Waiting for a process named '$process_name' with CPU usage over $cpu_threshold%..." 1>&2
+# echo "Waiting for a process named '$process_name' with CPU usage over $cpu_threshold%..." 1>&2
 
-while true; do
-    # Use `ps` to list processes sorted by CPU, exclude this script and grep
-    candidate=$(ps -eo pid,comm,%cpu,%mem --sort=-%cpu | grep -E "^\s*[0-9]+ $process_name" | head -n 1)
+# while true; do
+#     # Use `ps` to list processes sorted by CPU, exclude this script and grep
+#     candidate=$(ps -eo pid,comm,%cpu,%mem --sort=-%cpu | grep -E "^\s*[0-9]+ $process_name" | head -n 1)
     
-    if [[ -n "$candidate" ]]; then
-        # Extract PID, CPU, and memory
-        pid=$(echo "$candidate" | awk '{print $1}')
-        cpu=$(echo "$candidate" | awk '{print $3}')
-        mem=$(echo "$candidate" | awk '{print $4}')
+#     if [[ -n "$candidate" ]]; then
+#         # Extract PID, CPU, and memory
+#         pid=$(echo "$candidate" | awk '{print $1}')
+#         cpu=$(echo "$candidate" | awk '{print $3}')
+#         mem=$(echo "$candidate" | awk '{print $4}')
 
-        # Check if the CPU usage exceeds the threshold
-        full_process_name=$(echo "$candidate" | awk '{print $2}')
-        if (( $(echo "$cpu > $cpu_threshold" | bc -l) )); then
-            echo "Found process '$full_process_name' (PID: $pid) with CPU: $cpu% and Memory: $mem%." 1>&2
-            break
-        fi
-    fi
+#         # Check if the CPU usage exceeds the threshold
+#         full_process_name=$(echo "$candidate" | awk '{print $2}')
+#         if (( $(echo "$cpu > $cpu_threshold" | bc -l) )); then
+#             echo "Found process '$full_process_name' (PID: $pid) with CPU: $cpu% and Memory: $mem%." 1>&2
+#             break
+#         fi
+#     fi
 
-    # Sleep briefly before checking again
-    sleep 0.1
-done
+#     # Sleep briefly before checking again
+#     sleep 0.1
+# done
 
 # Found process
+full_process_name=$(ps -p $pid -o comm=)
 echo "Monitoring contiguity of process $pid (name: $full_process_name)..." 1>&2
 
 # ================================================================
@@ -66,7 +69,7 @@ mkdir -p ${TMP_DIR}/ptables
 while ps -p $pid > /dev/null; do
     PTIME=$(ps -p $pid -o etime=)
     TIME=$(python3 $DIR/src/python/parse_time.py $PTIME)
-    CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid ${TMP_DIR}/ptables/pagemap $2)
+    CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid ${TMP_DIR}/ptables/pagemap $max_regions)
     RET=$?
 
     # Check that CONTIG is not just whitespace or empty
