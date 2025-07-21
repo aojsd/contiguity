@@ -207,8 +207,12 @@ fi
 
 # --- Initial Setup ---
 DIRTY_BYTES=$((DIRTY * 4096))
-CURR_DIR=$(pwd)
-OUTDIR="${CURR_DIR}/${OUTPUT_DIR}/${APP_NAME}/${PIN_MODE}"
+CURR_DIR=$SCRIPT_DIR
+
+# Set output directories to be relative unless OUTPUT_DIR is absolute
+if [[ "$OUTPUT_DIR" != /* ]]; then
+    OUTDIR="${CURR_DIR}/${OUTPUT_DIR}/${APP_NAME}/${PIN_MODE}"
+fi
 APP_OUT_DIR="${OUTDIR}/app"
 DIST_OUT_DIR="${OUTDIR}/dist"
 THP_DIR="${OUTDIR}/thp"
