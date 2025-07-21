@@ -11,31 +11,6 @@ CONT_DIR=/home/michael/ISCA_2025_results/contiguity
 pid="$1"
 process_name="$2"
 max_regions="$3"
-# cpu_threshold=25.0  # Define the minimum CPU usage percentage
-
-# echo "Waiting for a process named '$process_name' with CPU usage over $cpu_threshold%..." 1>&2
-
-# while true; do
-#     # Use `ps` to list processes sorted by CPU, exclude this script and grep
-#     candidate=$(ps -eo pid,comm,%cpu,%mem --sort=-%cpu | grep -E "^\s*[0-9]+ $process_name" | head -n 1)
-    
-#     if [[ -n "$candidate" ]]; then
-#         # Extract PID, CPU, and memory
-#         pid=$(echo "$candidate" | awk '{print $1}')
-#         cpu=$(echo "$candidate" | awk '{print $3}')
-#         mem=$(echo "$candidate" | awk '{print $4}')
-
-#         # Check if the CPU usage exceeds the threshold
-#         full_process_name=$(echo "$candidate" | awk '{print $2}')
-#         if (( $(echo "$cpu > $cpu_threshold" | bc -l) )); then
-#             echo "Found process '$full_process_name' (PID: $pid) with CPU: $cpu% and Memory: $mem%." 1>&2
-#             break
-#         fi
-#     fi
-
-#     # Sleep briefly before checking again
-#     sleep 0.1
-# done
 
 # Found process
 full_process_name=$(ps -p $pid -o comm=)
@@ -44,6 +19,9 @@ echo "Monitoring contiguity of process $pid (name: $full_process_name)..." 1>&2
 # ================================================================
 # Live profilers - Interrupted in contiguity_trials.sh (SIGINT)
 # ================================================================
+# Set the target pid for the sleep_dilation module
+echo ${pid} | sudo tee /sys/kernel/sleep_dilation/target_pid
+
 # Attach perf to the process
 sudo perf stat -e instructions,L1-dcache-loads,L1-dcache-stores -p ${pid} -a &> ${TMP_DIR}/${process_name}.perf &
 

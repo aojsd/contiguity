@@ -62,27 +62,38 @@ run_and_capture_pid() {
     local final_cmd_to_run
     if [ -z "$pin_args" ]; then
         echo "--- ${remote_host}: Running application natively ---" >&2
-        final_cmd_to_run="/usr/bin/time -v ${app_cmd}"
+        final_cmd_to_run="${CG} /usr/bin/time -v ${app_cmd}"
     else
         echo "--- ${remote_host}: Running application with Pin args: ${pin_args} ---" >&2
         local pin="/home/michael/software/PiTracer/pin"
         local pt="/home/michael/software/PiTracer/source/tools/PiTracer/obj-intel64/pitracer.so"
-        final_cmd_to_run="/usr/bin/time -v ${pin} -t ${pt} ${pin_args} -- ${app_cmd}"
+        final_cmd_to_run="${CG} /usr/bin/time -v ${pin} -t ${pt} ${pin_args} -- ${app_cmd}"
     fi
 
     # This command correctly handles the 'tee' pipeline and the 'time' fork.
     local remote_command="
+        # Start the command in a backgrounded subshell.
         { ${final_cmd_to_run}; } > \"${remote_log_file}\" 2>&1 &
-        TIME_PID=\$!
 
-        # Disown the background job so the remote shell can exit.
-        disown \$TIME_PID
+        # Capture the PID of the subshell process.
+        SUBSHELL_PID=\$!
+        disown \$SUBSHELL_PID
 
+        # Step 1: Find the child of the subshell, which is the 'time' process.
+        TIME_PID=\$(pgrep -P \$SUBSHELL_PID)
+        while [ -z \"\$TIME_PID\" ]; do
+            sleep 0.01
+            TIME_PID=\$(pgrep -P \$SUBSHELL_PID)
+        done
+
+        # Step 2: Find the child of the 'time' process, which is the actual application.
         APP_PID=\$(pgrep -P \$TIME_PID)
         while [ -z \"\$APP_PID\" ]; do
             sleep 0.01
             APP_PID=\$(pgrep -P \$TIME_PID)
         done
+
+        # Echo the final, correct application PID.
         echo \$APP_PID
     "
     
@@ -100,75 +111,88 @@ prepare_remote_system() {
     
     echo "--- Preparing remote system for trial ${trial_num} ---"
 
-    # Clear previous run data and create directories for the current trial
-    ssh "${remote_host}" "rm -rf /home/michael/ssd/scratch/*"
-    ssh "${remote_host}" "rm -rf /home/michael/ISCA_2025_results/tmp/*"
-    ssh "${remote_host}" "mkdir -p /home/michael/ssd/scratch/${APP}_tmp/"
+    # --- Step 1: Pre-Reboot Cleanup ---
+    # Build and run the commands that must happen before a reboot.
+    local pre_reboot_cmds=""
+    pre_reboot_cmds+="rm -rf /home/michael/ssd/scratch/*; "
+    pre_reboot_cmds+="rm -rf /home/michael/ISCA_2025_results/tmp/*; "
+    pre_reboot_cmds+="mkdir -p /home/michael/ssd/scratch/${APP}_tmp/;"
+    
+    echo "Cleaning up remote directories..."
+    ssh "${remote_host}" "${pre_reboot_cmds}"
 
-    # Reboot machine for a clean slate, unless disabled
+    # --- Step 2: Reboot (if enabled) ---
+    # This remains a separate, blocking command.
     if [ "$NO_REBOOT" != "1" ]; then
         echo "Rebooting ${remote_host}..."
         ssh "${remote_host}" "sudo reboot"
+        echo "Waiting 60 seconds for reboot..."
         sleep 60
     fi
 
+    # --- Step 3: Build and Run Post-Reboot Commands ---
+    # Create a string of all setup commands to run in a single SSH session.
+    # This makes it easy to add, remove, or comment out individual steps.
+    echo "Applying fragmentation, kernel, and system settings..."
+    local post_reboot_cmds="set -ex;" # Start with set -ex for debugging and exit-on-error
+
     # Fragment system if requested
+    local random_freelist_arg="0" # Default to 0 (no random freelist)
     if [ "$FRAGMENT" != "0" ]; then
-        echo "Generating ${FRAGMENT}GB of memory fragmentation..."
-        RANDOM_FREELIST=1 # Fragmentation implies random freelist
-        ssh "${remote_host}" "cd ${CONTIGUITY}; ./kern_fragment.sh 1 ${FRAGMENT} 100"
-        ssh "${remote_host}" "cd ${CONTIGUITY}; ./kern_fragment.sh 0"
+        random_freelist_arg="1" # Fragmentation implies random freelist
+        post_reboot_cmds+="cd ${CONTIGUITY}; ./kern_fragment.sh 1 ${FRAGMENT} 100; ./kern_fragment.sh 0; "
     fi
-    ssh "${remote_host}" "${CONTIGUITY}/random_freelist.sh ${RANDOM_FREELIST}"
+    post_reboot_cmds+="${CONTIGUITY}/random_freelist.sh ${random_freelist_arg}; "
 
     # Apply system settings
-    echo "Applying kernel and system settings..."
     if [ "$THP" == "1" ]; then
         local thp_dir="/sys/kernel/mm/transparent_hugepage"
-        ssh "${remote_host}" "sudo sh -c 'echo always > ${thp_dir}/enabled'"
-        ssh "${remote_host}" "sudo sh -c 'echo ${THP_SCAN} > ${thp_dir}/khugepaged/pages_to_scan'"
-        ssh "${remote_host}" "sudo sh -c 'echo ${THP_SLEEP} > ${thp_dir}/khugepaged/scan_sleep_millisecs'"
+        post_reboot_cmds+="sudo sh -c 'echo always > ${thp_dir}/enabled'; "
+        post_reboot_cmds+="sudo sh -c 'echo ${THP_SCAN} > ${thp_dir}/khugepaged/pages_to_scan'; "
+        post_reboot_cmds+="sudo sh -c 'echo ${THP_SLEEP} > ${thp_dir}/khugepaged/scan_sleep_millisecs'; "
     fi
     if [ "$DIRTY_BYTES" != "0" ]; then
-        ssh "${remote_host}" "sudo sh -c 'echo ${DIRTY_BYTES} > /proc/sys/vm/dirty_bytes'"
-        ssh "${remote_host}" "sudo sh -c 'echo $((DIRTY_BYTES >> 1)) > /proc/sys/vm/dirty_background_bytes'"
+        post_reboot_cmds+="sudo sh -c 'echo ${DIRTY_BYTES} > /proc/sys/vm/dirty_bytes'; "
+        post_reboot_cmds+="sudo sh -c 'echo $((DIRTY_BYTES >> 1)) > /proc/sys/vm/dirty_background_bytes'; "
     fi
     if [ "$ZERO_COMPACT" == "1" ]; then
-        ssh "${remote_host}" "sudo sh -c 'echo 0 > /proc/sys/vm/compaction_proactiveness'"
+        post_reboot_cmds+="sudo sh -c 'echo 0 > /proc/sys/vm/compaction_proactiveness'; "
     fi
     if [ "$NO_COMPACT" == "1" ]; then
-        ssh "${remote_host}" "sudo sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/defrag'"
-    fi
-
-    # Configure CPU limits via cgroup
-    CG=""
-    if [ "$CPU_LIMIT" != "0" ]; then
-        MAX_CPU=$(echo "$CPU_LIMIT 1000" | awk '{print $1 * $2}')
-        ssh "${remote_host}" "sudo mkdir -p /sys/fs/cgroup/pin"
-        ssh "${remote_host}" "sudo chmod o+w /sys/fs/cgroup/cgroup.procs /sys/fs/cgroup/pin/cgroup.procs"
-        CG="cgexec -g cpu:pin"
+        post_reboot_cmds+="sudo sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/defrag'; "
     fi
     if [ "$TIME_DILATION" != "0" ]; then
-        ssh "${remote_host}" "echo ${TIME_DILATION} | sudo tee /proc/sys/time_dilation/time_dilation" > /dev/null
+        post_reboot_cmds+="echo ${TIME_DILATION} | sudo tee /proc/sys/time_dilation/time_dilation > /dev/null; "
     fi
-    
-    # Apply other system-wide settings
-    ssh "${remote_host}" "sudo sh -c 'echo 0 > /proc/sys/kernel/nmi_watchdog'"
-    ssh "${remote_host}" "sudo sh -c 'echo 0 > /proc/sys/vm/swappiness'"
-    ssh "${remote_host}" "sudo swapoff -a"
-    ssh "${remote_host}" "sudo sh -c 'echo off > /sys/devices/system/cpu/smt/control'"
-    ssh "${remote_host}" "sudo chown michael /dev/hugepages"
-    ssh "${remote_host}" "sudo sh -c 'echo 1024 > /proc/sys/vm/nr_hugepages'"
-    ssh "${remote_host}" "echo 0 | sudo tee /proc/sys/kernel/randomize_va_space > /dev/null"
+    post_reboot_cmds+="sudo mkdir -p /sys/fs/cgroup/pin; "
+    post_reboot_cmds+="sudo chmod o+w /sys/fs/cgroup/cgroup.procs /sys/fs/cgroup/pin/cgroup.procs; "
 
-    # Start the consumer process for pitracer/nocache modes
+    # Apply other system-wide settings
+    post_reboot_cmds+="sudo sh -c 'echo 0 > /proc/sys/kernel/nmi_watchdog'; "
+    post_reboot_cmds+="sudo sh -c 'echo 0 > /proc/sys/vm/swappiness'; "
+    post_reboot_cmds+="sudo swapoff -a; "
+    post_reboot_cmds+="sudo sh -c 'echo off > /sys/devices/system/cpu/smt/control'; "
+    post_reboot_cmds+="sudo chown michael /dev/hugepages; "
+    post_reboot_cmds+="sudo sh -c 'echo 1024 > /proc/sys/vm/nr_hugepages'; "
+    post_reboot_cmds+="echo 0 | sudo tee /proc/sys/kernel/randomize_va_space > /dev/null; "
+
+    # Insert sleep dilation kernel module
+    post_reboot_cmds+="sudo insmod ${CONTIGUITY}/sleep_dilation/sleep_dilation.ko; "
+
+    # Drop caches right before the run
+    post_reboot_cmds+="sudo /home/michael/ssd/drop_cache.sh;"
+
+    # Execute the entire command string in one go
+    ssh "${remote_host}" "${post_reboot_cmds}"
+
+    # --- Step 4: Local Variable and Background Process ---
+    # These still run locally or separately.
+    CG="cgexec -g cpu:pin"
+    
     if [ "$NOCACHE" == "1" ]; then
         local c_dir="/home/michael/software/PiTracer/source/tools/PiTracer/consumer"
         ssh "${remote_host}" "${c_dir}/consumer ${OUTP_DIR} ${CONSUMER_ZSTD}" &
     fi
-    
-    # Drop caches right before the run
-    ssh "${remote_host}" "sudo /home/michael/ssd/drop_cache.sh"
 }
 
 
@@ -210,7 +234,9 @@ DIRTY_BYTES=$((DIRTY * 4096))
 CURR_DIR=$SCRIPT_DIR
 
 # Set output directories to be relative unless OUTPUT_DIR is absolute
-if [[ "$OUTPUT_DIR" != /* ]]; then
+if [[ "$OUTPUT_DIR" == /* ]]; then
+    OUTDIR=$(realpath "$OUTPUT_DIR")
+else
     OUTDIR="${CURR_DIR}/${OUTPUT_DIR}/${APP_NAME}/${PIN_MODE}"
 fi
 APP_OUT_DIR="${OUTDIR}/app"
@@ -334,8 +360,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     ssh -n -T "${REMOTE_HOST}" "tail -f --pid=${APP_PID} ${REMOTE_APP_LOG}" &
     TAIL_PID=$! # Capture PID of the local 'tail' process.
 
-    ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./loop.sh ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/${PIN_MODE}.txt" &
-    LOOP_PID=$!
+    ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./loop.sh ${APP_PID} ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/${PIN_MODE}.txt" &
     if [[ $APP_NAME == mem* ]]; then
         # --- Memcached Path ---
         if [ "$CPU_LIMIT" != "0" ]; then
@@ -366,7 +391,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
         wait ${TAIL_PID}
     fi
     ssh "${REMOTE_HOST}" "cat /proc/vmstat" > "$THP_DIR/vmstat_${APP}_$i.txt"
-    echo "--- Benchmark finished ---"
+    echo "\n--- Benchmark finished ---"
 
     # 3. CLEAN UP remote processes
     echo "--- Halting remote processes ---"
@@ -376,7 +401,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f perf"
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f kthread_cputime.bt"
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f pid_syscall_profiler.bt"
-    wait $(jobs -p) # Wait for all local background jobs (like loop.sh) to finish
+    wait $(jobs -p) # Wait for all background jobs (ssh <host> loop.sh) to finish
 
     if [ "$CPU_LIMIT" != "0" ]; then
         ssh "${REMOTE_HOST}" "echo '100000 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
@@ -401,17 +426,19 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     if [ "$DIST" == "1" ]; then
         scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.dist" "${DIST_OUT_DIR}/${APP}_${PIN_MODE}_dist_${i}.txt"
     fi
-    
     rm -rf "${OUTDIR}/ptables_${i}"
-    ssh "${REMOTE_HOST}" "rm -f /home/michael/ISCA_2025_results/tmp/ptables/pagemap"
-    scp -r "${REMOTE_HOST}:/home/michael/ISCA_2025_results/tmp/ptables" "${PTABLE_DIR}/ptables_${i}"
+    ssh "${REMOTE_HOST}" "rm -f ${TMP_DIR}/ptables/pagemap"
+    scp -r "${REMOTE_HOST}:${TMP_DIR}/ptables" "${PTABLE_DIR}/ptables_${i}"
 
+    # Cleanup
+    ssh "${REMOTE_HOST}" "rm -rf ${TMP_DIR}/*"
+    ssh "${REMOTE_HOST}" "sudo rmmod sleep_dilation"
+    ssh "${REMOTE_HOST}" "rm -rf /home/michael/ssd/scratch/${APP}_tmp"
+
+    # Process the results
     P_SRC_KWORK="${CONTIGUITY}/kernel_work/python"
     python3 "${P_SRC_KWORK}/kthread_parse.py" "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.kthread_cputime"
     python3 "${P_SRC_KWORK}/syscall_parse.py" "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.syscalls"
-
-    # 5. FINAL cleanup for the trial
-    ssh "${REMOTE_HOST}" "rm -rf /home/michael/ssd/scratch/${APP}_tmp"
 done
 
 echo "========================= All trials completed. ========================="
