@@ -6,9 +6,89 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 # Source the shared configuration file using the absolute path.
 source "${SCRIPT_DIR}/.arg_parsing.sh"
 
+# Remote directory for contiguity experiments
+CONTIGUITY="/home/michael/ISCA_2025_results/contiguity"
+
 # ==========================================================================================================
 # Script Functions
 # ==========================================================================================================
+
+# (Place this in the functions section of contiguity_trials.sh)
+
+# Constructs and runs the remote application command, capturing its PID.
+# Arguments:
+#   $1: Remote host
+#   $2: Application name (e.g., "memcached-12T")
+#   $3: Application log file path on remote
+#   $4...: Pin arguments
+# Outputs:
+#   The PID of the remotely executed application.
+run_and_capture_pid() {
+    local remote_host="$1"
+    local app_name="$2"
+    local remote_log_file="$3"
+    shift 3
+    local pin_args="$@"
+
+    local threads=6
+    if [[ $app_name =~ -([0-9]+)T$ ]]; then
+        threads="${BASH_REMATCH[1]}"
+        echo "Threads: ${threads}"
+    fi
+
+    local app_cmd
+    case "$app_name" in
+        *llama*)
+            local llama_root="/home/michael/software/llama.cpp"
+            app_cmd="${llama_root}/build/bin/llama-cli -n 500 -s 0 --no-mmap -t ${threads} -m ${llama_root}/models/llama-2-7b-chat.Q5_K_M.gguf"
+            ;;
+        *pr*)
+            export OMP_NUM_THREADS=${threads}
+            local pr_root="/home/michael/software/gapbs"
+            app_cmd="${pr_root}/pr -f ${pr_root}/benchmark/graphs/twitter.sg -n 1"
+            ;;
+        *memcached*)
+            app_cmd="/home/michael/software/memcached/memcached -p 11211 -m 16384 -t ${threads} -u michael"
+            ;;
+        *)
+            echo "Error: Invalid application '$app_name'" >&2
+            return 1
+            ;;
+    esac
+
+    local pin="/home/michael/software/PiTracer/pin"
+    local pt="/home/michael/software/PiTracer/source/tools/PiTracer/obj-intel64/pitracer.so"
+    
+    local final_cmd_to_run
+    if [ -z "$pin_args" ]; then
+        echo "--- ${remote_host}: Running application natively ---" >&2
+        final_cmd_to_run="/usr/bin/time -v ${app_cmd}"
+    else
+        echo "--- ${remote_host}: Running application with Pin args: ${pin_args} ---" >&2
+        local pin="/home/michael/software/PiTracer/pin"
+        local pt="/home/michael/software/PiTracer/source/tools/PiTracer/obj-intel64/pitracer.so"
+        final_cmd_to_run="/usr/bin/time -v ${pin} -t ${pt} ${pin_args} -- ${app_cmd}"
+    fi
+
+    # This command correctly handles the 'tee' pipeline and the 'time' fork.
+    local remote_command="
+        { ${final_cmd_to_run}; } > \"${remote_log_file}\" 2>&1 &
+        TIME_PID=\$!
+
+        # Disown the background job so the remote shell can exit.
+        disown \$TIME_PID
+
+        APP_PID=\$(pgrep -P \$TIME_PID)
+        while [ -z \"\$APP_PID\" ]; do
+            sleep 0.01
+            APP_PID=\$(pgrep -P \$TIME_PID)
+        done
+        echo \$APP_PID
+    "
+    
+    # Execute and capture the clean PID output.
+    ssh -n -T "${remote_host}" "${remote_command}"
+}
 
 # Prepares the remote system for a single benchmark trial.
 # Arguments:
@@ -36,10 +116,10 @@ prepare_remote_system() {
     if [ "$FRAGMENT" != "0" ]; then
         echo "Generating ${FRAGMENT}GB of memory fragmentation..."
         RANDOM_FREELIST=1 # Fragmentation implies random freelist
-        ssh "${remote_host}" "cd /home/michael/ISCA_2025_results/contiguity; ./kern_fragment.sh 1 ${FRAGMENT} 100"
-        ssh "${remote_host}" "cd /home/michael/ISCA_2025_results/contiguity; ./kern_fragment.sh 0"
+        ssh "${remote_host}" "cd ${CONTIGUITY}; ./kern_fragment.sh 1 ${FRAGMENT} 100"
+        ssh "${remote_host}" "cd ${CONTIGUITY}; ./kern_fragment.sh 0"
     fi
-    ssh "${remote_host}" "ISCA_2025_results/contiguity/random_freelist.sh ${RANDOM_FREELIST}"
+    ssh "${remote_host}" "${CONTIGUITY}/random_freelist.sh ${RANDOM_FREELIST}"
 
     # Apply system settings
     echo "Applying kernel and system settings..."
@@ -79,6 +159,7 @@ prepare_remote_system() {
     ssh "${remote_host}" "sudo sh -c 'echo off > /sys/devices/system/cpu/smt/control'"
     ssh "${remote_host}" "sudo chown michael /dev/hugepages"
     ssh "${remote_host}" "sudo sh -c 'echo 1024 > /proc/sys/vm/nr_hugepages'"
+    ssh "${remote_host}" "echo 0 | sudo tee /proc/sys/kernel/randomize_va_space > /dev/null"
 
     # Start the consumer process for pitracer/nocache modes
     if [ "$NOCACHE" == "1" ]; then
@@ -220,10 +301,6 @@ case "$PIN_MODE" in
         ;;
 esac
 
-# Copy run_pin.sh to remote machine
-scp /home/michael/ISCA_2025_results/run_pin.sh "${REMOTE_HOST}:/home/michael/ISCA_2025_results/"
-ssh "${REMOTE_HOST}" "chmod +x /home/michael/ISCA_2025_results/run_pin.sh"
-
 # ==========================================================================================================
 # Run Trials
 # ==========================================================================================================
@@ -239,11 +316,24 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     if [ "$TRACK_PIN" == "1" ]; then
         REGIONS="-1"
     fi
-    ssh "${REMOTE_HOST}" "cd /home/michael/ISCA_2025_results/contiguity; ./loop.sh ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/${PIN_MODE}.txt" &
+
+    # Define the remote log file path for the application
+    REMOTE_APP_LOG="/home/michael/ISCA_2025_results/tmp/${APP}.out"
+    
+    # Call the new function to run the app and capture its PID
+    # The PIN_ARGS variable is already set by the script's setup logic
+    APP_PID=$(run_and_capture_pid "$REMOTE_HOST" "$APP" "$REMOTE_APP_LOG" $PIN_ARGS)
+    echo "--- Application started remotely with PID: ${APP_PID} ---"
+
+    # Tail the remote log file in the background to monitor the application output
+    # Output will appear on your local terminal.
+    ssh -n -T "${REMOTE_HOST}" "tail -f --pid=${APP_PID} ${REMOTE_APP_LOG}" &
+    TAIL_PID=$! # Capture PID of the local 'tail' process.
+
+    ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./loop.sh ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/${PIN_MODE}.txt" &
+    LOOP_PID=$!
     if [[ $APP_NAME == mem* ]]; then
         # --- Memcached Path ---
-        ssh "${REMOTE_HOST}" "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
-        
         if [ "$CPU_LIMIT" != "0" ]; then
             sleep 5
             ssh "${REMOTE_HOST}" "echo '${MAX_CPU} 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
@@ -256,9 +346,6 @@ for i in $(seq 1 "$NUM_TRIALS"); do
         cd - > /dev/null
     else
         # --- Generic Application Path ---
-        ssh "${REMOTE_HOST}" "cd /home/michael/ISCA_2025_results; ${CG} ./run_pin.sh ${APP} ${PIN_ARGS}" &
-        PIN_PID=$!
-
         if [ "$CPU_LIMIT" != "0" ]; then
             sleep 5
             ssh "${REMOTE_HOST}" "echo '${MAX_CPU} 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
@@ -271,7 +358,8 @@ for i in $(seq 1 "$NUM_TRIALS"); do
         fi
         ssh "${REMOTE_HOST}" "cat /proc/vmstat" > "$THP_DIR/vmstat_loaded_${APP}_$i.txt"
         
-        wait $PIN_PID
+        # This command blocks until the remote process with APP_PID finishes.
+        wait ${TAIL_PID}
     fi
     ssh "${REMOTE_HOST}" "cat /proc/vmstat" > "$THP_DIR/vmstat_${APP}_$i.txt"
     echo "--- Benchmark finished ---"
@@ -284,7 +372,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f perf"
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f kthread_cputime.bt"
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f pid_syscall_profiler.bt"
-    wait $(jobs -p) # Wait for all local background jobs (like ssh) to finish
+    wait $(jobs -p) # Wait for all local background jobs (like loop.sh) to finish
 
     if [ "$CPU_LIMIT" != "0" ]; then
         ssh "${REMOTE_HOST}" "echo '100000 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
@@ -295,7 +383,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
 
     # 4. COLLECT & PROCESS results
     echo "--- Collecting and processing results ---"
-    P_SRC_CONTIG="/home/michael/ISCA_2025_results/contiguity/src/python"
+    P_SRC_CONTIG="${CONTIGUITY}/src/python"
     ssh "${REMOTE_HOST}" "python3 ${P_SRC_CONTIG}/check_ptables.py /home/michael/ISCA_2025_results/tmp/ptables >> /home/michael/ISCA_2025_results/tmp/${NAME}.perf"
     
     ssh "${REMOTE_HOST}" "echo -n 'Trace directory size: '; du -sh /home/michael/ssd/scratch/${APP}_tmp/"
@@ -313,8 +401,8 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     rm -rf "${OUTDIR}/ptables_${i}"
     ssh "${REMOTE_HOST}" "rm -f /home/michael/ISCA_2025_results/tmp/ptables/pagemap"
     scp -r "${REMOTE_HOST}:/home/michael/ISCA_2025_results/tmp/ptables" "${PTABLE_DIR}/ptables_${i}"
-    
-    P_SRC_KWORK="/home/michael/ISCA_2025_results/contiguity/kernel_work/python"
+
+    P_SRC_KWORK="${CONTIGUITY}/kernel_work/python"
     python3 "${P_SRC_KWORK}/kthread_parse.py" "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.kthread_cputime"
     python3 "${P_SRC_KWORK}/syscall_parse.py" "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.syscalls"
 
