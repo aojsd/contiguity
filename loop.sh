@@ -31,8 +31,8 @@ sudo ${CONT_DIR}/kernel_work/kthread_cputime.bt > ${TMP_DIR}/${process_name}.kth
 # =================================================
 # Track activity of ONLY APPLICATION SYSCALLS
 # =================================================
-echo "Parsing memory maps for PID $PIN_PID..."
-MAPS=$(cat /proc/$PIN_PID/maps)
+echo "Parsing memory maps for PID ${pid}..."
+MAPS=$(cat /proc/${pid}/maps)
 
 PIN_RANGE=$(echo "$MAPS" | grep 'pinbin' | grep 'r-xp' | head -n 1 | awk -F'[- ]' '{print "0x"$1, "0x"$2}')
 TOOL_RANGE=$(echo "$MAPS" | grep 'pitracer.so' | grep 'r-xp' | head -n 1 | awk -F'[- ]' '{print "0x"$1, "0x"$2}')
