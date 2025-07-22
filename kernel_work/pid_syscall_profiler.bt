@@ -14,13 +14,6 @@
 tracepoint:raw_syscalls:sys_enter
 /pid == $1/
 {
-    // Exclude syscalls originating from the Pin runtime or the pintool itself.
-    $ip = reg("ip");
-    if (($ip >= $2 && $ip < $3) || ($ip >= $4 && $ip < $5)) {
-        // Instruction pointer is inside a tool region, so we skip it.
-        return;
-    }
-
     // We still use 'tid' to correctly track concurrent calls from
     // different threads within the same process.
     [cite_start]@start[tid] = nsecs; [cite: 2]

@@ -431,6 +431,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     # Cleanup
     ssh "${REMOTE_HOST}" "rm -rf ${TMP_DIR}/*"
     ssh "${REMOTE_HOST}" "rm -rf /home/michael/ssd/scratch/${APP}_tmp"
+    ssh "${REMOTE_HOST}" "sudo rmmod sleep_dilation"
 
     # Process the results
     P_SRC_KWORK="${CONTIGUITY}/kernel_work/python"
