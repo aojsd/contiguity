@@ -37,9 +37,13 @@ MAPS=$(cat /proc/${pid}/maps)
 PIN_RANGE=$(echo "$MAPS" | grep 'pinbin' | grep 'r-xp' | head -n 1 | awk -F'[- ]' '{print "0x"$1, "0x"$2}')
 TOOL_RANGE=$(echo "$MAPS" | grep 'pitracer.so' | grep 'r-xp' | head -n 1 | awk -F'[- ]' '{print "0x"$1, "0x"$2}')
 
+echo "Found memory ranges:"
+echo "  pinbin: $PIN_RANGE"
+echo "  pintool: $TOOL_RANGE"
+
 if [ -z "$PIN_RANGE" ] || [ -z "$TOOL_RANGE" ]; then
     echo "Error: Could not find memory ranges for pinbin or the pintool."
-    kill $PIN_PID
+    kill ${pid}
     exit 1
 fi
 

@@ -13,8 +13,6 @@ CONTIGUITY="/home/michael/ISCA_2025_results/contiguity"
 # Script Functions
 # ==========================================================================================================
 
-# (Place this in the functions section of contiguity_trials.sh)
-
 # Constructs and runs the remote application command, capturing its PID.
 # Arguments:
 #   $1: Remote host
@@ -357,7 +355,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
 
     # Tail the remote log file in the background to monitor the application output
     # Output will appear on your local terminal.
-    ssh -n -T "${REMOTE_HOST}" "tail -f --pid=${APP_PID} ${REMOTE_APP_LOG}" &
+    ssh -n -T "${REMOTE_HOST}" "tail -f --pid=${APP_PID} ${REMOTE_APP_LOG}" > /dev/null &
     TAIL_PID=$! # Capture PID of the local 'tail' process.
 
     ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./loop.sh ${APP_PID} ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/${PIN_MODE}.txt" &
@@ -432,7 +430,6 @@ for i in $(seq 1 "$NUM_TRIALS"); do
 
     # Cleanup
     ssh "${REMOTE_HOST}" "rm -rf ${TMP_DIR}/*"
-    ssh "${REMOTE_HOST}" "sudo rmmod sleep_dilation"
     ssh "${REMOTE_HOST}" "rm -rf /home/michael/ssd/scratch/${APP}_tmp"
 
     # Process the results
