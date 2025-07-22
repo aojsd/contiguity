@@ -355,7 +355,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
 
     # Tail the remote log file in the background to monitor the application output
     # Output will appear on your local terminal.
-    ssh -n -T "${REMOTE_HOST}" "tail -f --pid=${APP_PID} ${REMOTE_APP_LOG}" > /dev/null &
+    ssh -n -T "${REMOTE_HOST}" "tail -f --pid=${APP_PID} ${REMOTE_APP_LOG}" &
     TAIL_PID=$! # Capture PID of the local 'tail' process.
 
     ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./loop.sh ${APP_PID} ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/${PIN_MODE}.txt" &

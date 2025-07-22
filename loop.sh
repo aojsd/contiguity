@@ -20,7 +20,7 @@ echo "Monitoring contiguity of process $pid (name: $full_process_name)..." 1>&2
 # Live profilers - Interrupted in contiguity_trials.sh (SIGINT)
 # ================================================================
 # Set the target pid for the sleep_dilation module
-echo ${pid} | sudo tee /sys/kernel/sleep_dilation/target_pid
+echo ${pid} | sudo tee /sys/kernel/sleep_dilation/target_pid 1>&2
 
 # Attach perf to the process
 sudo perf stat -e instructions,L1-dcache-loads,L1-dcache-stores -p ${pid} -a &> ${TMP_DIR}/${process_name}.perf &
@@ -31,18 +31,18 @@ sudo ${CONT_DIR}/kernel_work/kthread_cputime.bt > ${TMP_DIR}/${process_name}.kth
 # =================================================
 # Track activity of ONLY APPLICATION SYSCALLS
 # =================================================
-echo "Parsing memory maps for PID ${pid}..."
+echo "Parsing memory maps for PID ${pid}..." 1>&2
 MAPS=$(cat /proc/${pid}/maps)
 
 PIN_RANGE=$(echo "$MAPS" | grep 'pinbin' | grep 'r-xp' | head -n 1 | awk -F'[- ]' '{print "0x"$1, "0x"$2}')
 TOOL_RANGE=$(echo "$MAPS" | grep 'pitracer.so' | grep 'r-xp' | head -n 1 | awk -F'[- ]' '{print "0x"$1, "0x"$2}')
 
-echo "Found memory ranges:"
-echo "  pinbin: $PIN_RANGE"
-echo "  pintool: $TOOL_RANGE"
+echo "Found memory ranges:" 1>&2
+echo "  pinbin: $PIN_RANGE" 1>&2
+echo "  pintool: $TOOL_RANGE" 1>&2
 
 if [ -z "$PIN_RANGE" ] || [ -z "$TOOL_RANGE" ]; then
-    echo "Error: Could not find memory ranges for pinbin or the pintool."
+    echo "Error: Could not find memory ranges for pinbin or the pintool." 1>&2
     kill ${pid}
     exit 1
 fi
