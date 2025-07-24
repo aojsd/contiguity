@@ -1,48 +1,54 @@
 #!/usr/bin/env bpftrace
 /*
- * message_profiler.bt
+ * profiler.bt
  *
- * Measures inter-message time for both incoming requests and outgoing
- * responses on a specific port. This version uses the correct tracepoint
- * argument 'skaddr'.
+ * This version uses the user-validated workaround of assigning bswap()
+ * to a variable before filtering to generate a final histogram.
  */
 
-#include <net/sock.h>
+#include <net/ip.h>
+#include <net/tcp.h>
 
-// === Incoming Requests (Client -> Server) ===
+// === Incoming Requests (Packet-level, via IP Layer) ===
 
-tracepoint:sock:sk_data_ready
+kprobe:ip_local_deliver
 {
-	// Correctly access the socket struct via the 'skaddr' argument.
-	$sk = (struct sock *)args->skaddr;
+	$skb = (struct sk_buff *)ctx->di;
+	$iph = (struct iphdr *)($skb->head + $skb->network_header);
 
-	// Filter for messages where the destination port is 11211.
-	if ($sk->__sk_common.skc_dport == bswap(11211))
-	{
-		$last_in = @ts_in;
-		@ts_in = nsecs;
+	if ($iph->protocol == IPPROTO_TCP) {
+		$tcph = (struct tcphdr *)($skb->head + $skb->transport_header);
+		// The critical workaround: store the byte-swapped value first.
+		$dport = bswap($tcph->dest);
 
-		if ($last_in > 0) {
-			@ns_delta_IN_msg = hist((@ts_in - $last_in));
+		// Now, filter on the intermediate variable.
+		if ($dport == 11211) {
+			$last_in = @ts_in;
+			@ts_in = nsecs;
+
+			if ($last_in > 0) {
+				// Populate the histogram instead of printing.
+				@ns_delta_IN_packet = hist(nsecs - $last_in);
+			}
 		}
 	}
 }
 
-// === Outgoing Responses (Server -> Client) ===
+// === Outgoing Responses (Message-level, via Port Filter) ===
 
 kprobe:tcp_sendmsg
 {
-	// Cast the first function argument (from %di register) to a sock struct.
 	$sk = (struct sock *)ctx->di;
+	$sport = $sk->__sk_common.skc_num;
 
-	// Filter for messages where the source port is 11211.
-	if ($sk->__sk_common.skc_num == 11211)
+	if ($sport == 11211)
 	{
 		$last_out = @ts_out;
 		@ts_out = nsecs;
 
 		if ($last_out > 0) {
-			@ns_delta_OUT_msg = hist((@ts_out - $last_out));
+			// Populate the histogram instead of printing.
+			@ns_delta_OUT_msg = hist(nsecs - $last_out);
 		}
 	}
 }
