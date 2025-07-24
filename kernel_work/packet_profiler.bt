@@ -1,3 +1,4 @@
+#!/usr/bin/env bpftrace
 /*
  * packet_profiler.bt
  *
