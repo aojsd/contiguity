@@ -1,44 +1,40 @@
 #!/usr/bin/env bpftrace
 /*
- * packet_profiler.bt
+ * message_profiler.bt
  *
- * Measures inter-packet time for both incoming and outgoing TCP packets
- * on a specific port and displays the results as two histograms.
- *
- * This version uses register-based argument access for kprobe compatibility
- * and a more stable hook point for outgoing packets.
+ * Measures inter-message time for both incoming requests and outgoing
+ * responses on a specific port. This version uses the correct tracepoint
+ * argument 'skaddr'.
  */
 
-// Include necessary kernel headers.
 #include <net/sock.h>
 
-// === Incoming Packets (Client -> Server) ===
+// === Incoming Requests (Client -> Server) ===
 
-kprobe:tcp_v4_do_rcv
+tracepoint:sock:sk_data_ready
 {
-	// Cast the first function argument (from the %di register) to a sock struct.
-	$sk = (struct sock *)ctx->di;
+	// Correctly access the socket struct via the 'skaddr' argument.
+	$sk = (struct sock *)args->skaddr;
 
-	// Filter for packets where the destination port is 11211.
+	// Filter for messages where the destination port is 11211.
 	if ($sk->__sk_common.skc_dport == bswap(11211))
 	{
 		$last_in = @ts_in;
 		@ts_in = nsecs;
 
 		if ($last_in > 0) {
-			@ns_delta_IN = hist((@ts_in - $last_in));
+			@ns_delta_IN_msg = hist((@ts_in - $last_in));
 		}
 	}
 }
 
-// === Outgoing Packets (Server -> Client) ===
+// === Outgoing Responses (Server -> Client) ===
 
-// Replaced tcp_transmit_skb with ip_queue_xmit for better compatibility.
 kprobe:tcp_sendmsg
 {
 	// Cast the first function argument (from %di register) to a sock struct.
 	$sk = (struct sock *)ctx->di;
-	
+
 	// Filter for messages where the source port is 11211.
 	if ($sk->__sk_common.skc_num == 11211)
 	{
