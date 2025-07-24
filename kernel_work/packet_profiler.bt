@@ -23,7 +23,7 @@ kprobe:tcp_recvmsg
 		@ts_in = nsecs;
 
 		if ($last_in > 0) {
-			@us_delta_IN_msg = hist((@ts_in - $last_in) / 1000);
+			@ns_delta_IN_msg = hist((@ts_in - $last_in));
 		}
 	}
 }
@@ -42,7 +42,7 @@ kprobe:tcp_sendmsg
 		@ts_out = nsecs;
 
 		if ($last_out > 0) {
-			@us_delta_OUT_msg = hist((@ts_out - $last_out) / 1000);
+			@ns_delta_OUT_msg = hist((@ts_out - $last_out));
 		}
 	}
 }
