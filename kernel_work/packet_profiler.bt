@@ -3,17 +3,18 @@
  * message_profiler.bt
  *
  * Measures inter-message time for both incoming requests and outgoing
- * responses on a specific port, operating at the application message level
- * to ignore packet fragmentation.
+ * responses on a specific port. This version uses sk_data_ready for
+ * reliable incoming message detection.
  */
 
 #include <net/sock.h>
 
 // === Incoming Requests (Client -> Server) ===
 
-kprobe:tcp_recvmsg
+// Use sk_data_ready, which is the main socket data notification function.
+kprobe:sk_data_ready
 {
-	// Cast the first function argument to a sock struct.
+	// Cast the first function argument (from %di register) to a sock struct.
 	$sk = (struct sock *)ctx->di;
 
 	// Filter for messages where the destination port is 11211.
@@ -32,7 +33,7 @@ kprobe:tcp_recvmsg
 
 kprobe:tcp_sendmsg
 {
-	// Cast the first function argument to a sock struct.
+	// Cast the first function argument (from %di register) to a sock struct.
 	$sk = (struct sock *)ctx->di;
 	
 	// Filter for messages where the source port is 11211.
