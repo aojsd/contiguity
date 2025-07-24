@@ -1,50 +1,48 @@
 #!/usr/bin/env bpftrace
 /*
- * packet_profiler.bt
+ * message_profiler.bt
  *
- * Measures inter-packet time for both incoming and outgoing TCP packets
- * on a specific port and displays the results as two histograms.
- *
- * This version uses register-based argument access for kprobe compatibility.
+ * Measures inter-message time for both incoming requests and outgoing
+ * responses on a specific port, operating at the application message level
+ * to ignore packet fragmentation.
  */
 
-// Include necessary kernel headers.
 #include <net/sock.h>
 
-// === Incoming Packets (Client -> Server) ===
+// === Incoming Requests (Client -> Server) ===
 
-kprobe:tcp_v4_do_rcv
+kprobe:tcp_recvmsg
 {
-	// Cast the first function argument (from the %di register) to a sock struct.
+	// Cast the first function argument to a sock struct.
 	$sk = (struct sock *)ctx->di;
 
-	// Filter for packets where the destination port is 11211.
+	// Filter for messages where the destination port is 11211.
 	if ($sk->__sk_common.skc_dport == bswap(11211))
 	{
 		$last_in = @ts_in;
 		@ts_in = nsecs;
 
 		if ($last_in > 0) {
-			@us_delta_IN = hist((@ts_in - $last_in) / 1000);
+			@us_delta_IN_msg = hist((@ts_in - $last_in) / 1000);
 		}
 	}
 }
 
-// === Outgoing Packets (Server -> Client) ===
+// === Outgoing Responses (Server -> Client) ===
 
-kprobe:tcp_transmit_skb
+kprobe:tcp_sendmsg
 {
-	// Cast the first function argument (from the %di register) to a sock struct.
+	// Cast the first function argument to a sock struct.
 	$sk = (struct sock *)ctx->di;
 	
-	// Filter for packets where the source port is 11211.
+	// Filter for messages where the source port is 11211.
 	if ($sk->__sk_common.skc_num == 11211)
 	{
 		$last_out = @ts_out;
 		@ts_out = nsecs;
 
 		if ($last_out > 0) {
-			@us_delta_OUT = hist((@ts_out - $last_out) / 1000);
+			@us_delta_OUT_msg = hist((@ts_out - $last_out) / 1000);
 		}
 	}
 }
@@ -53,7 +51,6 @@ kprobe:tcp_transmit_skb
 
 END
 {
-	// Clear the global timestamp variables.
 	clear(@ts_in);
 	clear(@ts_out);
 }
