@@ -35,7 +35,6 @@ void parsePmapOutput(std::vector<MemoryRegion> &regions, size_t &totalRSS, bool 
         if (filter) {
             // Skip the shared memory regions
             if (skip_shared_mem) {
-                assert(permissions.compare("rw---") == 0);
                 skip_shared_mem = false;
                 continue;
             }
