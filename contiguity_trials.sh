@@ -46,7 +46,7 @@ run_and_capture_pid() {
             app_cmd="${pr_root}/pr -f ${pr_root}/benchmark/graphs/twitter.sg -n 1"
             ;;
         *memcached*)
-            app_cmd="/home/michael/software/memcached/memcached -p 11211 -m 16384 -t ${threads} -u michael"
+            app_cmd="/home/michael/software/memcached/memcached -p 11211 -l 127.0.0.1 -m 16384 -u michael"
             ;;
         *)
             echo "Error: Invalid application '$app_name'" >&2
@@ -114,7 +114,8 @@ prepare_remote_system() {
     local pre_reboot_cmds=""
     pre_reboot_cmds+="rm -rf /home/michael/ssd/scratch/*; "
     pre_reboot_cmds+="rm -rf /home/michael/ISCA_2025_results/tmp/*; "
-    pre_reboot_cmds+="mkdir -p /home/michael/ssd/scratch/${APP}_tmp/;"
+    pre_reboot_cmds+="mkdir -p /home/michael/ssd/scratch/${APP}_tmp/; "
+    pre_reboot_cmds+="sudo /home/michael/ssd/drop_cache.sh; "
     
     echo "Cleaning up remote directories..."
     ssh "${remote_host}" "${pre_reboot_cmds}"
@@ -132,7 +133,7 @@ prepare_remote_system() {
     # Create a string of all setup commands to run in a single SSH session.
     # This makes it easy to add, remove, or comment out individual steps.
     echo "Applying fragmentation, kernel, and system settings..."
-    local post_reboot_cmds="set -ex;" # Start with set -ex for debugging and exit-on-error
+    local post_reboot_cmds="set -x;" # Start with set -x for debugging
 
     # Fragment system if requested
     local random_freelist_arg="0" # Default to 0 (no random freelist)
@@ -162,6 +163,9 @@ prepare_remote_system() {
     if [ "$TIME_DILATION" != "0" ]; then
         post_reboot_cmds+="echo ${TIME_DILATION} | sudo tee /proc/sys/time_dilation/time_dilation > /dev/null; "
     fi
+    if [ "$CPU_LIMIT" != "0" ]; then
+        MAX_CPU=$((CPU_LIMIT * 1000))
+    fi
     post_reboot_cmds+="sudo mkdir -p /sys/fs/cgroup/pin; "
     post_reboot_cmds+="sudo chmod o+w /sys/fs/cgroup/cgroup.procs /sys/fs/cgroup/pin/cgroup.procs; "
 
@@ -177,6 +181,11 @@ prepare_remote_system() {
     # Insert sleep dilation kernel module
     post_reboot_cmds+="sudo insmod ${CONTIGUITY}/kernel_work/sleep_dilation/sleep_dilation.ko; "
 
+    # Make /sys/fs/cgroup/pin/cpu.max and /sys/kernel/sleep_dilation/dilation_factor writable
+    post_reboot_cmds+="sudo chmod o+w /sys/fs/cgroup/pin/cpu.max; "
+    post_reboot_cmds+="sudo chmod o+w /sys/kernel/sleep_dilation/dilation_factor; "
+    post_reboot_cmds+="sudo chown -R michael:michael /sys/fs/cgroup/pin; "
+
     # Drop caches right before the run
     post_reboot_cmds+="sudo /home/michael/ssd/drop_cache.sh;"
 
@@ -189,7 +198,9 @@ prepare_remote_system() {
     
     if [ "$NOCACHE" == "1" ]; then
         local c_dir="/home/michael/software/PiTracer/source/tools/PiTracer/consumer"
-        ssh "${remote_host}" "${c_dir}/consumer ${OUTP_DIR} ${CONSUMER_ZSTD}" &
+        ssh "${remote_host}" \
+            "${c_dir}/consumer ${OUTP_DIR} ${CONSUMER_ZSTD} -s 10 -p 100000" \
+            "2> /home/michael/ISCA_2025_results/tmp/consumer.log" &
     fi
 }
 
@@ -256,9 +267,6 @@ fi
 if [[ $APP_NAME == mem* ]]; then
     case "$APP_NAME" in
         memA*)  WORKLOAD="workloada";;
-        memB*)  WORKLOAD="workloadb";;
-        memC*)  WORKLOAD="workloadc";;
-        memW*)  WORKLOAD="workloadw";;
         memDY*) WORKLOAD="workload_dynamic";;
         *)      echo "Invalid memcached workload: $APP_NAME"; exit 1;;
     esac
@@ -271,14 +279,6 @@ if [[ $APP_NAME == mem* ]]; then
 else
     APP=$APP_NAME
 fi
-
-# YCSB commands (if needed)
-TARGET_IP=$(ssh -G "${REMOTE_HOST}" | awk '/^hostname/ { print $2 }')
-YCSB_ROOT=/home/michael/software/YCSB
-YCSB_HOST_ARGS="-p memcached.hosts=${TARGET_IP} -p memcached.port=11211 -p memcached.opTimeoutMillis=1000000"
-YCSB_ARGS="-s -threads 12 -p hdrhistogram.percentiles=90,99,99.9,99.99 ${YCSB_HOST_ARGS}"
-YCSB_LOAD="python2 ${YCSB_ROOT}/bin/ycsb load memcached -P ${YCSB_ROOT}/workloads/${WORKLOAD} ${YCSB_ARGS}"
-YCSB_RUN="python2 ${YCSB_ROOT}/bin/ycsb run memcached -P ${YCSB_ROOT}/workloads/${WORKLOAD} ${YCSB_ARGS}"
 
 # Pin Arguments
 OUTPREFIX="/home/michael/ssd/scratch/${APP}_tmp/${APP}"
@@ -361,16 +361,22 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./loop.sh ${APP_PID} ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/${PIN_MODE}.txt" &
     if [[ $APP_NAME == mem* ]]; then
         # --- Memcached Path ---
+        # Start tracking packet activity
+        ssh "${REMOTE_HOST}" "sudo ${CONTIGUITY}/kernel_work/packet_profiler.bt > /home/michael/ISCA_2025_results/tmp/${NAME}.packets" &
+
+        # Create a cgroup to rate-limit netcat to 10% CPU
+        ssh ${REMOTE_HOST} "sudo mkdir /sys/fs/cgroup/netcat; sudo chmod o+w /sys/fs/cgroup/netcat/cgroup.procs;" \
+                           "sudo sh -c 'echo 10000 100000 > /sys/fs/cgroup/netcat/cpu.max'"
+        NC_CG="cgexec -g cpu:netcat"
+        NC_FILE="/home/michael/software/YCSB/workloads/workload_traces/${APP_NAME}.dat"
+
+        # Let memcached server come up
+        sleep 5
         if [ "$CPU_LIMIT" != "0" ]; then
-            sleep 5
             ssh "${REMOTE_HOST}" "echo '${MAX_CPU} 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
         fi
-        
-        cd "$YCSB_ROOT"
-        $YCSB_LOAD 2>&1 | grep -e "\[OVERALL\]" -e "\[READ\]" -e "\[UPDATE\]" -e "\[INSERT\]" -e "FAILED\]" | tee "$APP_OUT_DIR/load_$i.out"
-        ssh "${REMOTE_HOST}" "cat /proc/vmstat" > "$THP_DIR/vmstat_loaded_${APP}_$i.txt"
-        $YCSB_RUN 2>&1 | grep -e "\[OVERALL\]" -e "\[READ\]" -e "\[UPDATE\]" -e "\[INSERT\]" -e "FAILED\]" | tee "$APP_OUT_DIR/run_$i.out"
-        cd - > /dev/null
+        # ssh "${REMOTE_HOST}" "nc -w 1 localhost 11211 < /home/michael/software/YCSB/workloads/workload_traces/${APP_NAME}.dat" > /dev/null
+        ssh "${REMOTE_HOST}" "${NC_CG} nc -w 1 localhost 11211 < ${NC_FILE}" > /dev/null
     else
         # --- Generic Application Path ---
         if [ "$CPU_LIMIT" != "0" ]; then
@@ -378,13 +384,6 @@ for i in $(seq 1 "$NUM_TRIALS"); do
             ssh "${REMOTE_HOST}" "echo '${MAX_CPU} 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
         fi
 
-        if [[ $PIN_MODE == *"disk"* ]] || [[ $PIN_MODE == *"fields"* ]] || [[ $PIN_MODE == *"sleep"* ]]; then
-            sleep 300
-        else
-            sleep 10
-        fi
-        ssh "${REMOTE_HOST}" "cat /proc/vmstat" > "$THP_DIR/vmstat_loaded_${APP}_$i.txt"
-        
         # This command blocks until the remote process with APP_PID finishes.
         wait ${TAIL_PID}
     fi
@@ -393,12 +392,13 @@ for i in $(seq 1 "$NUM_TRIALS"); do
 
     # 3. CLEAN UP remote processes
     echo "--- Halting remote processes ---"
+    ssh "${REMOTE_HOST}" "sudo pkill -2 -f perf"
     if [[ $APP_NAME == mem* ]]; then
         ssh "${REMOTE_HOST}" "sudo pkill -2 -f /home/michael/software/memcached/memcached"
     fi
-    ssh "${REMOTE_HOST}" "sudo pkill -2 -f perf"
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f kthread_cputime.bt"
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f pid_syscall_profiler.bt"
+    ssh "${REMOTE_HOST}" "sudo pkill -2 -f packet_profiler.bt"
     wait $(jobs -p) # Wait for all background jobs (ssh <host> loop.sh) to finish
 
     if [ "$CPU_LIMIT" != "0" ]; then
@@ -416,11 +416,15 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     ssh "${REMOTE_HOST}" "echo -n 'Trace directory size: '; du -sh /home/michael/ssd/scratch/${APP}_tmp/"
     
     TMP_DIR="/home/michael/ISCA_2025_results/tmp"
-    scp "${REMOTE_HOST}:${TMP_DIR}/${PIN_MODE}.txt"              "${OUTDIR}/${APP}_${PIN_MODE}_${i}.txt"
+    scp "${REMOTE_HOST}:${TMP_DIR}/${PIN_MODE}.txt"              "${OUTDIR}/${PIN_MODE}_${i}.txt"
     scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.out"                   "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}.out"
+    scp "${REMOTE_HOST}:${TMP_DIR}/consumer.log"                 "${OUTDIR}/consumer_${APP}_${PIN_MODE}_${i}.log"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.perf"                 "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}.perf"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.kthread_cputime"      "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.kthread_cputime"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.syscalls"             "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.syscalls"
+    if [[ $APP_NAME == mem* ]]; then
+        scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.packets"          "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.packets"
+    fi
     if [ "$DIST" == "1" ]; then
         scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.dist" "${DIST_OUT_DIR}/${APP}_${PIN_MODE}_dist_${i}.txt"
     fi
@@ -430,8 +434,9 @@ for i in $(seq 1 "$NUM_TRIALS"); do
 
     # Cleanup
     ssh "${REMOTE_HOST}" "rm -rf ${TMP_DIR}/*"
-    ssh "${REMOTE_HOST}" "rm -rf /home/michael/ssd/scratch/${APP}_tmp"
+    ssh "${REMOTE_HOST}" "sudo rm -rf /home/michael/ssd/scratch/${APP}_tmp"
     ssh "${REMOTE_HOST}" "sudo rmmod sleep_dilation"
+    ssh "${REMOTE_HOST}" "sudo rmdir /sys/fs/cgroup/pin"
 
     # Process the results
     P_SRC_KWORK="${CONTIGUITY}/kernel_work/python"

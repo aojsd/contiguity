@@ -24,6 +24,7 @@ if [ "$#" -lt 4 ]; then
     exit 1
 fi
 FAST_MODE=0
+EXP=0
 
 # --- Parse Positional Arguments first ---
 TRIALS=$1
@@ -39,8 +40,10 @@ shift 4 # Consume positional arguments so only optional ones remain
 ARG_ARRAY=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --fast)
+        --fast|-f|--FAST)
             FAST_MODE=1; shift 1;;
+        --exp|-e|--EXP)
+            EXP="1"; shift 1;;
         --config)
             # This logic remains as it is specific to this script
             parse_config_file "$2"
@@ -65,14 +68,18 @@ echo "--- Running all configurations for application: ${APP} ---"
 if [ "$FAST_MODE" == "1" ]; then echo "--- FAST MODE ENABLED ---"; fi
 echo "Passing extra args: ${ARG_ARRAY[@]}"
 
-# Use set -x to see the exact commands being executed
-set -x
-
 # --- Execute Trials for Each Pin Mode ---
-./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR native "${ARG_ARRAY[@]}"
-./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR empty "${ARG_ARRAY[@]}"
-./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR fields "${ARG_ARRAY[@]}"
-./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR pitracer "${ARG_ARRAY[@]}"
+# Experiment mode --> don't skip native, empty, and fields if EXP is 0
+if [ "$EXP" == "0" ]; then
+    set -x
+    ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR native "${ARG_ARRAY[@]}"
+    ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR empty "${ARG_ARRAY[@]}"
+    # ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR fields "${ARG_ARRAY[@]}"
+else
+    echo "--- Skipping native, empty, and fields configurations in experiment mode. ---"
+    set -x
+fi
+# ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR pitracer "${ARG_ARRAY[@]}"
 
 # If in fast mode, exit now
 if [ "$FAST_MODE" == "1" ]; then

@@ -79,7 +79,7 @@ parse_trial_args() {
             --THP_SCAN)         THP_SCAN="$2"; shift 2 ;;
             --THP_SLEEP)        THP_SLEEP="$2"; shift 2 ;;
             --DIRTY)            DIRTY="$2"; shift 2 ;;
-            --CPU)              CPU_LIMIT="$2"; shift 2 ;;
+            --CPU|--CPU_LIMIT)              CPU_LIMIT="$2"; shift 2 ;;
             --TIME_DILATION)    TIME_DILATION="$2"; shift 2 ;;
             --FRAGMENT)         FRAGMENT="$2"; shift 2 ;;
             --LOOP_SLEEP)       LOOP_SLEEP="$2"; shift 2 ;;
