@@ -22,7 +22,7 @@
 // --- Configuration ---
 const char* HOST = "127.0.0.1";
 const int PORT = 11211;
-const int MAX_TOTAL_IN_FLIGHT = 64; // Max requests across ALL connections
+const int MAX_TOTAL_IN_FLIGHT = 1024; // Max requests across ALL connections
 const int BUFFER_SIZE = 16384; 
 const int DEFAULT_CONNECTIONS = 4;
 const long UPDATE_INTERVAL = 100000; // How often to print live updates
