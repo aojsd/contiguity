@@ -21,7 +21,7 @@
 // --- Configuration ---
 const char* HOST = "127.0.0.1";
 const int PORT = 11211;
-const int MAX_IN_FLIGHT = 100; // Maximum number of concurrent requests
+const int MAX_IN_FLIGHT = 64; // Maximum number of concurrent requests
 const int BUFFER_SIZE = 16384; // Increased buffer for high throughput
 
 // --- Data Structures ---
