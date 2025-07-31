@@ -2,6 +2,7 @@ results/
 local_scripts/
 .vscode/
 dump_pagemap
+memcached_requests
 check_contiguity
 src/test
 tmp*
