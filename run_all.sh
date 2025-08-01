@@ -89,10 +89,10 @@ if [ "$FAST_MODE" == "1" ]; then
     exit 0
 fi
 
-./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk-nocache "${ARG_ARRAY[@]}"
 ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk "${ARG_ARRAY[@]}"
-# ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR "disk-largebuf" "${ARG_ARRAY[@]}"
-# ./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR "empty-sleep" "${ARG_ARRAY[@]}"
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR disk-nocache "${ARG_ARRAY[@]}"
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR tidial "${ARG_ARRAY[@]}"
+./contiguity_trials.sh $TRIALS $HOST $APP $OUTDIR tidial-balanced "${ARG_ARRAY[@]}"
 
 set +x
 echo "--- All runs complete. ---"
