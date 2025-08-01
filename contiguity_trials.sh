@@ -46,7 +46,9 @@ run_and_capture_pid() {
             app_cmd="${pr_root}/pr -f ${pr_root}/benchmark/graphs/twitter.sg -n 1"
             ;;
         *memcached*)
-            app_cmd="/home/michael/software/memcached/memcached -p 11211 -l 127.0.0.1 -m 16384 -u michael"
+            IP="127.0.0.1"
+            ARGS="-p 11211 -l ${IP} -m 16384 -u michael"
+            app_cmd="/home/michael/software/memcached/memcached ${ARGS}"
             ;;
         *)
             echo "Error: Invalid application '$app_name'" >&2
@@ -64,8 +66,15 @@ run_and_capture_pid() {
     else
         echo "--- ${remote_host}: Running application with Pin args: ${pin_args} ---" >&2
         local pin="/home/michael/software/PiTracer/pin"
-        local pt="/home/michael/software/PiTracer/source/tools/PiTracer/obj-intel64/pitracer.so"
-        final_cmd_to_run="${CG} /usr/bin/time -v ${pin} -t ${pt} ${pin_args} -- ${app_cmd}"
+
+        if [ "$BBLOCK_ONLY" == "1" ]; then
+            echo "Running bblock profiler only, no application execution." >&2
+            local pt="/home/michael/software/PiTracer/source/tools/PiTracer/obj-intel64/bblock_profiler.so"
+            final_cmd_to_run="${CG} /usr/bin/time -v ${pin} -t ${pt} ${pin_args} -- ${app_cmd}"
+        else
+            local pt="/home/michael/software/PiTracer/source/tools/PiTracer/obj-intel64/pitracer.so"
+            final_cmd_to_run="${CG} /usr/bin/time -v ${pin} -t ${pt} ${pin_args} -- ${app_cmd}"
+        fi
     fi
 
     # This command correctly handles the 'tee' pipeline and the 'time' fork.
@@ -190,6 +199,7 @@ prepare_remote_system() {
     post_reboot_cmds+="sudo /home/michael/ssd/drop_cache.sh;"
 
     # Execute the entire command string in one go
+    post_reboot_cmds+="set +x;"
     ssh "${remote_host}" "${post_reboot_cmds}"
 
     # --- Step 4: Local Variable and Background Process ---
@@ -197,9 +207,18 @@ prepare_remote_system() {
     CG="cgexec -g cpu:pin"
     
     if [ "$NOCACHE" == "1" ]; then
+        ARGS=""
+        if [ "$CONSUMER_DYNAMIC" == "1" ]; then
+            # CONTROL_DYNAMIC="--dynamic"
+            ARGS+=" --dynamic"
+        fi
+        if [ "$CONSUMER_BALANCING" == "1" ]; then
+            # CONTROL_BALANCING="--balance"
+            ARGS+=" --balance"
+        fi
         local c_dir="/home/michael/software/PiTracer/source/tools/PiTracer/consumer"
         ssh "${remote_host}" \
-            "${c_dir}/consumer ${OUTP_DIR} ${CONSUMER_ZSTD} -s 10 -p 100000" \
+            "${c_dir}/consumer ${OUTP_DIR} ${CONSUMER_ZSTD} -s 10 -p 100000 ${ARGS}" \
             "2> /home/michael/ISCA_2025_results/tmp/consumer.log" &
     fi
 }
@@ -296,6 +315,10 @@ case "$PIN_MODE" in
     empty)
         PIN_ARGS="-stage1 0 -bpages 16 ${PIN_EXTRA} ${DIST_FILE}"
         ;;
+    bblock)
+        PIN_ARGS="-o /home/michael/ISCA_2025_results/tmp/${NAME}.bblocks"
+        BBLOCK_ONLY=1
+        ;;
     empty-sleep)
         PIN_ARGS="-stage1 0 -bpages 16 -iosleep 1 ${PIN_EXTRA} ${DIST_FILE}"
         ;;
@@ -305,6 +328,17 @@ case "$PIN_MODE" in
     disk-nocache)
         PIN_ARGS="-comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
         NOCACHE=1
+        ;;
+    tidial)
+        PIN_ARGS="-comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        NOCACHE=1
+        CONSUMER_DYNAMIC=1
+        ;;
+    tidial-balanced)
+        PIN_ARGS="-comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        NOCACHE=1
+        CONSUMER_DYNAMIC=1
+        CONSUMER_BALANCING=1
         ;;
     disk-largebuf)
         PIN_ARGS="-stage1 0 -outprefix ${OUTPREFIX} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
@@ -364,19 +398,19 @@ for i in $(seq 1 "$NUM_TRIALS"); do
         # Start tracking packet activity
         ssh "${REMOTE_HOST}" "sudo ${CONTIGUITY}/kernel_work/packet_profiler.bt > /home/michael/ISCA_2025_results/tmp/${NAME}.packets" &
 
-        # Create a cgroup to rate-limit netcat to 10% CPU
-        ssh ${REMOTE_HOST} "sudo mkdir /sys/fs/cgroup/netcat; sudo chmod o+w /sys/fs/cgroup/netcat/cgroup.procs;" \
-                           "sudo sh -c 'echo 10000 100000 > /sys/fs/cgroup/netcat/cpu.max'"
-        NC_CG="cgexec -g cpu:netcat"
-        NC_FILE="/home/michael/software/YCSB/workloads/workload_traces/${APP_NAME}.dat"
+        # Create a cgroup to rate-limit the request generator to 10% CPU
+        ssh ${REMOTE_HOST} "sudo mkdir /sys/fs/cgroup/request_trace; sudo chmod o+w /sys/fs/cgroup/request_trace/cgroup.procs;" \
+                           "sudo sh -c 'echo 10000 100000 > /sys/fs/cgroup/request_trace/cpu.max'"
+        # RQ_CG="cgexec -g cpu:request_trace"
+        RQ_FILE="/home/michael/software/YCSB/workloads/workload_traces/${APP_NAME}.dat"
+        RQ_PROG="/home/michael/ISCA_2025_results/contiguity/memcached_requests"
 
         # Let memcached server come up
         sleep 5
         if [ "$CPU_LIMIT" != "0" ]; then
             ssh "${REMOTE_HOST}" "echo '${MAX_CPU} 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
         fi
-        # ssh "${REMOTE_HOST}" "nc -w 1 localhost 11211 < /home/michael/software/YCSB/workloads/workload_traces/${APP_NAME}.dat" > /dev/null
-        ssh "${REMOTE_HOST}" "${NC_CG} nc -w 1 localhost 11211 < ${NC_FILE}" > /dev/null
+        ssh "${REMOTE_HOST}" "${RQ_CG} ${RQ_PROG} ${RQ_FILE} --live | tee /home/michael/ISCA_2025_results/tmp/${NAME}.rq"
     else
         # --- Generic Application Path ---
         if [ "$CPU_LIMIT" != "0" ]; then
@@ -418,15 +452,21 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     TMP_DIR="/home/michael/ISCA_2025_results/tmp"
     scp "${REMOTE_HOST}:${TMP_DIR}/${PIN_MODE}.txt"              "${OUTDIR}/${PIN_MODE}_${i}.txt"
     scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.out"                   "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}.out"
-    scp "${REMOTE_HOST}:${TMP_DIR}/consumer.log"                 "${OUTDIR}/consumer_${APP}_${PIN_MODE}_${i}.log"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.perf"                 "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}.perf"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.kthread_cputime"      "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.kthread_cputime"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.syscalls"             "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.syscalls"
     if [[ $APP_NAME == mem* ]]; then
         scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.packets"          "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.packets"
+        scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.rq"              "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.rq"
     fi
     if [ "$DIST" == "1" ]; then
         scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.dist" "${DIST_OUT_DIR}/${APP}_${PIN_MODE}_dist_${i}.txt"
+    fi
+    if [ "$BBLOCK_ONLY" == "1" ]; then
+        scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.bblocks" "${OUTDIR}/${NAME}_bblocks_${i}.txt"
+    fi
+    if [ "$NOCACHE" == "1" ]; then
+        scp "${REMOTE_HOST}:${TMP_DIR}/consumer.log" "${OUTDIR}/consumer_${APP}_${PIN_MODE}_${i}.log"
     fi
     rm -rf "${OUTDIR}/ptables_${i}"
     ssh "${REMOTE_HOST}" "rm -f ${TMP_DIR}/ptables/pagemap"
