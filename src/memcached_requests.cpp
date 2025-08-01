@@ -10,6 +10,7 @@
 #include <cerrno>
 #include <sstream>
 #include <numeric>
+#include <unordered_set> // Include for the hash set
 
 // Networking includes
 #include <arpa/inet.h>
@@ -25,12 +26,13 @@ const int PORT = 11211;
 const int MAX_TOTAL_IN_FLIGHT = 1024; // Max requests across ALL connections
 const int BUFFER_SIZE = 16384; 
 const int DEFAULT_CONNECTIONS = 4;
-const long UPDATE_INTERVAL = 100000; // How often to print live updates
+const long UPDATE_INTERVAL = 10000; // How often to print live updates
 
 // --- Data Structures ---
 
 struct Request {
     std::string command_type;
+    std::string key; // Store the key to track dependencies
     std::chrono::high_resolution_clock::time_point send_time;
 };
 
@@ -81,7 +83,7 @@ bool make_socket_non_blocking(int fd) {
     return true;
 }
 
-void print_stats(const std::map<std::string, Stats>& stats_map, const std::map<std::string, long long>& response_map) {
+void print_stats(const std::map<std::string, Stats>& stats_map, const std::map<std::string, long long>& response_map, long long stall_count) {
     std::cout << "\n--- Trace Replay Finished ---\n";
     std::cout << "\n--- Performance Statistics ---\n";
     for (const auto& pair : stats_map) {
@@ -105,9 +107,19 @@ void print_stats(const std::map<std::string, Stats>& stats_map, const std::map<s
         }
         std::cout << "--------------------------------\n";
     }
+
+    std::cout << "\n--- Replay Metrics ---\n";
+    std::cout << "  - Stalls on pending keys: " << stall_count << "\n";
+    std::cout << "--------------------------------\n";
 }
 
-bool process_responses_for_connection(ConnectionState& conn, std::map<std::string, Stats>& stats, std::map<std::string, long long>& responses) {
+// Now needs pending_add_keys to unlock keys
+bool process_responses_for_connection(
+    ConnectionState& conn, 
+    std::map<std::string, Stats>& stats, 
+    std::map<std::string, long long>& responses,
+    std::unordered_set<std::string>& pending_add_keys) 
+{
     if (conn.in_flight_requests.empty()) return false;
 
     size_t end_of_line_pos = conn.receive_buffer.find("\r\n");
@@ -163,12 +175,35 @@ bool process_responses_for_connection(ConnectionState& conn, std::map<std::strin
             stats[current_request.command_type].update(latency.count());
         }
         responses[response_key]++;
+
+        // *** UNLOCK KEY ***: If this was an 'add', remove its key from the pending set
+        if (current_request.command_type == "add") {
+            pending_add_keys.erase(current_request.key);
+        }
+
         conn.in_flight_requests.pop();
         conn.receive_buffer.erase(0, consumed_len);
         return true;
     }
     return false;
 }
+
+// Function to change epoll monitoring mode
+void set_epoll_mode(int epoll_fd, std::vector<ConnectionState>& connections, bool send_enabled) {
+    struct epoll_event event;
+    event.events = EPOLLIN | EPOLLET; // Always listen for input
+    if (send_enabled) {
+        event.events |= EPOLLOUT;
+    }
+
+    for (auto& conn : connections) {
+        event.data.ptr = &conn;
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, conn.fd, &event) == -1) {
+            perror("epoll_ctl_mod");
+        }
+    }
+}
+
 
 // --- Main Logic ---
 
@@ -183,173 +218,151 @@ int main(int argc, char* argv[]) {
 
     for (int i = 2; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "--live") {
-            live_updates_enabled = true;
-        } else if (arg == "-c" || arg == "--connections") {
+        if (arg == "--live") { live_updates_enabled = true; } 
+        else if (arg == "-c" || arg == "--connections") {
             if (i + 1 < argc) {
-                try {
-                    num_connections = std::stoi(argv[++i]);
-                } catch (const std::exception& e) {
-                    std::cerr << "Invalid number for connections: " << e.what() << std::endl;
-                    return 1;
-                }
+                try { num_connections = std::stoi(argv[++i]); } 
+                catch (const std::exception& e) { std::cerr << "Invalid number for connections: " << e.what() << std::endl; return 1; }
             }
         }
     }
 
     std::ifstream trace_file(trace_filename);
-    if (!trace_file.is_open()) {
-        std::cerr << "Error: Could not open trace file '" << trace_filename << "'" << std::endl;
-        return 1;
-    }
+    if (!trace_file.is_open()) { std::cerr << "Error: Could not open trace file '" << trace_filename << "'" << std::endl; return 1; }
 
-    // --- Setup Connections and Epoll ---
     std::vector<ConnectionState> connections(num_connections);
     int epoll_fd = epoll_create1(0);
-    if (epoll_fd == -1) {
-        perror("epoll_create1");
-        return 1;
-    }
+    if (epoll_fd == -1) { perror("epoll_create1"); return 1; }
 
     for (int i = 0; i < num_connections; ++i) {
         int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
         if (sock_fd < 0) { perror("socket"); return 1; }
-
         struct sockaddr_in serv_addr;
         memset(&serv_addr, 0, sizeof(serv_addr));
         serv_addr.sin_family = AF_INET;
         serv_addr.sin_port = htons(PORT);
         inet_pton(AF_INET, HOST, &serv_addr.sin_addr);
-
-        if (connect(sock_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
-            perror("connect"); return 1;
-        }
+        if (connect(sock_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) { perror("connect"); return 1; }
         make_socket_non_blocking(sock_fd);
         connections[i].fd = sock_fd;
-
         struct epoll_event event;
         event.events = EPOLLIN | EPOLLOUT | EPOLLET;
-        event.data.ptr = &connections[i]; // Point to the connection's state
-        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sock_fd, &event) == -1) {
-            perror("epoll_ctl"); return 1;
-        }
+        event.data.ptr = &connections[i];
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sock_fd, &event) == -1) { perror("epoll_ctl_add"); return 1; }
     }
     std::cout << "Established " << num_connections << " connections to " << HOST << ":" << PORT << std::endl;
 
-    // --- Initialize State ---
     std::map<std::string, Stats> statistics;
     std::map<std::string, long long> response_counts;
+    // NOTE: This assumes the trace does not contain multiple concurrent 'add' requests for the same key.
+    // A more robust implementation for arbitrary traces would use a map to count pending adds per key.
+    std::unordered_set<std::string> pending_add_keys;
     bool trace_file_done = false;
     long total_requests_sent = 0;
     size_t next_connection_idx = 0;
     size_t total_in_flight = 0;
-    long last_update_req_count = 0; // For periodic updates
+    long last_update_req_count = 0;
+    std::string stalled_on_key = "";
+    long long stall_count = 0;
 
-    if (!live_updates_enabled) {
-        std::cout << "Live updates disabled. Use --live to enable." << std::endl;
-    }
+    if (!live_updates_enabled) { std::cout << "Live updates disabled. Use --live to enable." << std::endl; }
 
-    // --- Main Event Loop ---
     while (!trace_file_done || total_in_flight > 0) {
-        // Always wait for an event. No more polling.
         struct epoll_event events[num_connections * 2];
         int n_events = epoll_wait(epoll_fd, events, num_connections * 2, -1);
 
-        if (n_events == -1) {
-            if (errno == EINTR) continue;
-            perror("epoll_wait"); break;
-        }
+        if (n_events == -1) { if (errno == EINTR) continue; perror("epoll_wait"); break; }
 
-        // 1. Process all I/O events that have occurred.
         for (int i = 0; i < n_events; ++i) {
             ConnectionState* conn = static_cast<ConnectionState*>(events[i].data.ptr);
-            
-            // Handle reads to clear out receive buffers
             if (events[i].events & EPOLLIN) {
                 char read_buffer[BUFFER_SIZE];
                 while (true) {
                     ssize_t count = read(conn->fd, read_buffer, BUFFER_SIZE);
-                    if (count > 0) {
-                        conn->receive_buffer.append(read_buffer, count);
-                    } else {
-                        if (errno != EAGAIN) { perror("read"); }
-                        break;
-                    }
+                    if (count > 0) conn->receive_buffer.append(read_buffer, count);
+                    else { if (errno != EAGAIN) perror("read"); break; }
                 }
             }
-            // Handle writes to mark the connection as ready to send again
-            if (events[i].events & EPOLLOUT) {
-                conn->is_writable = true;
-            }
+            if (events[i].events & EPOLLOUT) conn->is_writable = true;
         }
         
-        // 2. Process all complete responses from all connections
         for(auto& conn : connections) {
-            while(process_responses_for_connection(conn, statistics, response_counts));
+            while(process_responses_for_connection(conn, statistics, response_counts, pending_add_keys));
         }
 
-        // 3. Calculate current in-flight count
         total_in_flight = 0;
         for(const auto& conn : connections) total_in_flight += conn.in_flight_requests.size();
 
-        // 4. Send new requests on any writable connection, respecting the limit
-        while (total_in_flight < MAX_TOTAL_IN_FLIGHT && !trace_file_done) {
+        // Check if we were stalled and if the key is now free
+        if (!stalled_on_key.empty() && pending_add_keys.count(stalled_on_key) == 0) {
+            stalled_on_key = "";
+            set_epoll_mode(epoll_fd, connections, true); // Re-enable sending
+        }
+
+        while (stalled_on_key.empty() && total_in_flight < MAX_TOTAL_IN_FLIGHT && !trace_file_done) {
             ConnectionState& conn = connections[next_connection_idx];
-            
-            if (!conn.is_writable) {
-                // This connection's send buffer is full, cannot send.
-                // We must break and wait for an EPOLLOUT event for this connection.
-                break;
-            }
+            if (!conn.is_writable) break;
 
             std::streampos before_read_pos = trace_file.tellg();
             std::string line1, line2;
-            if (!std::getline(trace_file, line1)) {
-                trace_file_done = true; break;
-            }
+            if (!std::getline(trace_file, line1)) { trace_file_done = true; break; }
             if (!line1.empty() && line1.back() == '\r') line1.pop_back();
 
-            std::string full_command, cmd_type;
-            if (line1.rfind("add ", 0) == 0 || line1.rfind("replace ", 0) == 0 || line1.rfind("set ", 0) == 0) {
+            std::string full_command, cmd_type, key;
+            std::stringstream ss(line1);
+            ss >> cmd_type >> key;
+
+            if (pending_add_keys.count(key)) {
+                stalled_on_key = key;
+                stall_count++;
+                set_epoll_mode(epoll_fd, connections, false); // Disable sending
+                trace_file.clear();
+                trace_file.seekg(before_read_pos);
+                break;
+            }
+
+            if (cmd_type == "add" || cmd_type == "replace" || cmd_type == "set") {
                 if (!std::getline(trace_file, line2)) { trace_file_done = true; break; }
                 if (!line2.empty() && line2.back() == '\r') line2.pop_back();
                 full_command = line1 + "\r\n" + line2 + "\r\n";
-                cmd_type = line1.substr(0, line1.find(' '));
-            } else if (line1.rfind("get ", 0) == 0) {
+            } else if (cmd_type == "get") {
                 full_command = line1 + "\r\n";
-                cmd_type = "get";
-            } else {
-                continue;
-            }
+            } else { continue; }
 
             ssize_t bytes_sent = write(conn.fd, full_command.c_str(), full_command.length());
             if (bytes_sent > 0) {
-                conn.in_flight_requests.push({cmd_type, std::chrono::high_resolution_clock::now()});
+                if (cmd_type == "add") { pending_add_keys.insert(key); }
+                conn.in_flight_requests.push({cmd_type, key, std::chrono::high_resolution_clock::now()});
                 total_requests_sent++;
                 total_in_flight++;
-                next_connection_idx = (next_connection_idx + 1) % num_connections; // Round-robin
+                next_connection_idx = (next_connection_idx + 1) % num_connections;
             } else if (bytes_sent == -1) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    conn.is_writable = false; // Mark as not writable
+                    conn.is_writable = false;
                     trace_file.clear();
                     trace_file.seekg(before_read_pos);
-                    break; // Stop sending and wait for EPOLLOUT
+                    break;
                 }
                 perror("write"); goto cleanup;
             }
         }
 
-        // *** FIX: Robust periodic update logic ***
-        if (live_updates_enabled && (total_requests_sent / UPDATE_INTERVAL > last_update_req_count / UPDATE_INTERVAL)) {
-            std::cout << "Sent: " << total_requests_sent << " | Total In-Flight: " << total_in_flight << "  \r" << std::flush;
+        if (live_updates_enabled && (total_requests_sent - last_update_req_count) >= UPDATE_INTERVAL) {
+            std::cout << "Sent: " << total_requests_sent << " | In-Flight: " << total_in_flight << " | Pending Adds: " << pending_add_keys.size();
+            if(!stalled_on_key.empty()) {
+                std::cout << " | Stalled on: " << stalled_on_key;
+            }
+            else {
+                std::cout << "\t\t\t";
+            }
+            std::cout << "  \r" << std::flush;
             last_update_req_count = total_requests_sent;
         }
     }
 
 cleanup:
     std::cout << "\nTrace file processed. Draining final responses..." << std::endl;
-    // The main loop condition already handles draining, but a final stats print is good.
-    print_stats(statistics, response_counts);
+    print_stats(statistics, response_counts, stall_count);
 
     for(auto& conn : connections) close(conn.fd);
     close(epoll_fd);
