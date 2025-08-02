@@ -392,16 +392,15 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     ssh -n -T "${REMOTE_HOST}" "tail -f --pid=${APP_PID} ${REMOTE_APP_LOG}" &
     TAIL_PID=$! # Capture PID of the local 'tail' process.
 
+    # Monitor contiguity and live profilers
     ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./loop.sh ${APP_PID} ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/${PIN_MODE}.txt" &
+    ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./live_profilers.sh ${APP_PID} ${NAME}" &
     if [[ $APP_NAME == mem* ]]; then
         # --- Memcached Path ---
         # Start tracking packet activity
         ssh "${REMOTE_HOST}" "sudo ${CONTIGUITY}/kernel_work/packet_profiler.bt > /home/michael/ISCA_2025_results/tmp/${NAME}.packets" &
 
         # Create a cgroup to rate-limit the request generator to 10% CPU
-        ssh ${REMOTE_HOST} "sudo mkdir /sys/fs/cgroup/request_trace; sudo chmod o+w /sys/fs/cgroup/request_trace/cgroup.procs;" \
-                           "sudo sh -c 'echo 10000 100000 > /sys/fs/cgroup/request_trace/cpu.max'"
-        # RQ_CG="cgexec -g cpu:request_trace"
         RQ_FILE="/home/michael/software/YCSB/workloads/workload_traces/${APP_NAME}.dat"
         RQ_PROG="/home/michael/ISCA_2025_results/contiguity/memcached_requests"
 
@@ -410,7 +409,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
         if [ "$CPU_LIMIT" != "0" ]; then
             ssh "${REMOTE_HOST}" "echo '${MAX_CPU} 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
         fi
-        ssh "${REMOTE_HOST}" "${RQ_CG} ${RQ_PROG} ${RQ_FILE} --live | tee /home/michael/ISCA_2025_results/tmp/${NAME}.rq"
+        ssh "${REMOTE_HOST}" "${RQ_PROG} ${RQ_FILE} --live | tee /home/michael/ISCA_2025_results/tmp/${NAME}.rq"
     else
         # --- Generic Application Path ---
         if [ "$CPU_LIMIT" != "0" ]; then
@@ -457,7 +456,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.syscalls"             "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.syscalls"
     if [[ $APP_NAME == mem* ]]; then
         scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.packets"          "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.packets"
-        scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.rq"              "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.rq"
+        scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.rq"               "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}.rq"
     fi
     if [ "$DIST" == "1" ]; then
         scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.dist" "${DIST_OUT_DIR}/${APP}_${PIN_MODE}_dist_${i}.txt"

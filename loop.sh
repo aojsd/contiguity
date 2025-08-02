@@ -16,22 +16,6 @@ max_regions="$3"
 full_process_name=$(ps -p $pid -o comm=)
 echo "Monitoring contiguity of process $pid (name: $full_process_name)..." 1>&2
 
-# ================================================================
-# Live profilers - Interrupted in contiguity_trials.sh (SIGINT)
-# ================================================================
-# Set the target pid for the sleep_dilation module
-echo ${pid} | sudo tee /sys/kernel/sleep_dilation/target_pid 1>&2
-
-# Attach perf to the process
-sudo perf stat -e instructions,L1-dcache-loads,L1-dcache-stores -p ${pid} -a &> ${TMP_DIR}/${process_name}.perf &
-
-# Profile kernel thread activity
-sudo ${CONT_DIR}/kernel_work/kthread_cputime.bt > ${TMP_DIR}/${process_name}.kthread_cputime &
-
-# Profile system calls
-sudo ${CONT_DIR}/kernel_work/pid_syscall_profiler.bt ${pid} > ${TMP_DIR}/${process_name}.syscalls &
-
-
 # =============================================
 # Contiguity tracking
 # =============================================
