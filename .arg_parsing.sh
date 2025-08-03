@@ -61,6 +61,7 @@ NO_REBOOT=0
 NO_COMPACT=0
 ZERO_COMPACT=0
 DIST=0
+SYNC_PROF=1
 TRACK_PIN=0
 RANDOM_FREELIST=0
 
@@ -73,13 +74,14 @@ parse_trial_args() {
             --NO_COMPACT)       NO_COMPACT=1; shift ;;
             --ZERO_COMPACT)     ZERO_COMPACT=1; shift ;;
             --DIST)             DIST=1; shift ;;
+            --SYNC|--SYNC_PROF) SYNC_PROF="$2"; shift 2 ;;
             --TRACK_PIN)        TRACK_PIN=1; shift ;;
             --RANDOM_FREELIST)  RANDOM_FREELIST=1; shift ;;
             --THP)              THP="$2"; shift 2 ;;
             --THP_SCAN)         THP_SCAN="$2"; shift 2 ;;
             --THP_SLEEP)        THP_SLEEP="$2"; shift 2 ;;
             --DIRTY)            DIRTY="$2"; shift 2 ;;
-            --CPU|--CPU_LIMIT)              CPU_LIMIT="$2"; shift 2 ;;
+            --CPU|--CPU_LIMIT)  CPU_LIMIT="$2"; shift 2 ;;
             --TIME_DILATION)    TIME_DILATION="$2"; shift 2 ;;
             --FRAGMENT)         FRAGMENT="$2"; shift 2 ;;
             --LOOP_SLEEP)       LOOP_SLEEP="$2"; shift 2 ;;
@@ -129,6 +131,7 @@ parse_config_file() {
             "Time Dilation Factor")             TIME_DILATION=$val ;;
             "Track Pin Memory Contiguity")      [[ "$val" == "Yes" ]] && TRACK_PIN=1 ;;
             "Collect Access Distribution")      [[ "$val" == "Yes" ]] && DIST=1 ;;
+            "Synchronization Profiling")        [[ "$val" == "Yes" ]] && SYNC_PROF=1 ;;
             "Extra Pin Arguments")              PIN_EXTRA="${val//\"/}" ;; # Remove quotes
             "Loop Script Sleep (sec)")          LOOP_SLEEP=$val ;;
         esac

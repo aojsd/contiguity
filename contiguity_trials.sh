@@ -307,6 +307,9 @@ DIST_FILE=""
 if [ "$DIST" == "1" ]; then
     DIST_FILE="-record_file /home/michael/ISCA_2025_results/tmp/${APP}.dist"
 fi
+if [ "$SYNC_PROF" == "1" ]; then
+    PIN_EXTRA+=" -prof_sync 1"
+fi
 
 case "$PIN_MODE" in
     native)
@@ -452,6 +455,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     scp "${REMOTE_HOST}:${TMP_DIR}/${PIN_MODE}.txt"              "${OUTDIR}/${PIN_MODE}_${i}.txt"
     scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.out"                   "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}.out"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.perf"                 "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}.perf"
+    scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}_threads.perf"         "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}_threads.perf"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.kthread_cputime"      "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.kthread_cputime"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.syscalls"             "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.syscalls"
     if [[ $APP_NAME == mem* ]]; then
