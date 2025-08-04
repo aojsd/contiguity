@@ -3,6 +3,7 @@ local_scripts/
 .vscode/
 dump_pagemap
 memcached_requests
+sync_microbench
 check_contiguity
 src/test
 tmp*

@@ -18,4 +18,4 @@ test: src/pow2_regions.cpp src/pmap.h src/test.cpp
 	$(CXX) $(CXXFLAGS) -o src/test src/pow2_regions.cpp src/test.cpp
 
 clean:
-	rm -f src/test dump_pagemap memcached_requests
+	rm -f src/test dump_pagemap memcached_requests sync_microbench
