@@ -26,7 +26,3 @@ sudo ${CONT_DIR}/kernel_work/pid_syscall_profiler.bt ${pid} > ${TMP_DIR}/${proce
 # Attach perf to the whole process
 EVENTS="instructions,L1-dcache-loads,L1-dcache-stores,rob_misc_events.pause_inst"
 sudo perf stat -e ${EVENTS} -p ${pid} -a &> ${TMP_DIR}/${process_name}.perf &
-
-# Profile threads of the process - sleep for a bit to ensure threads are ready
-sleep 20
-sudo perf stat --per-thread -e ${EVENTS} -p ${pid} -a &> ${TMP_DIR}/${process_name}_threads.perf &
