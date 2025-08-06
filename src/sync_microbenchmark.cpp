@@ -254,8 +254,9 @@ void reader_task(size_t buffer_size, size_t value_size, long long ops_target, bo
         }
 
         while (is_writable && !target_sent && in_flight_queue.size() < buffer_size) {
+            auto send_time = std::chrono::high_resolution_clock::now();
             if (send(sock_fd, get_command.c_str(), get_command.length(), 0) > 0) {
-                in_flight_queue.push({std::chrono::high_resolution_clock::now()});
+                in_flight_queue.push({send_time});
                 reads_sent++;
                 if (reads_sent >= ops_target) {
                     target_sent = true;
@@ -366,8 +367,9 @@ void writer_task(size_t buffer_size, size_t value_size, long long ops_target) {
         while (is_writable && !target_sent && in_flight_queue.size() < buffer_size) {
             update_value[0]++;
             std::string replace_command = "replace " + BENCHMARK_KEY + " 0 0 " + std::to_string(update_value.length()) + "\r\n" + update_value + "\r\n";
+            auto send_time = std::chrono::high_resolution_clock::now();
             if (send(sock_fd, replace_command.c_str(), replace_command.length(), 0) > 0) {
-                in_flight_queue.push({std::chrono::high_resolution_clock::now()});
+                in_flight_queue.push({send_time});
                 writes_sent++;
                 if (writes_sent >= ops_target) {
                     target_sent = true;
