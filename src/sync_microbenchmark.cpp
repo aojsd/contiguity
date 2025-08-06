@@ -6,6 +6,10 @@
 #include <cstring>
 #include <cerrno>
 #include <queue>
+#include <algorithm> // For std::sort
+#include <cmath>     // For std::ceil
+#include <sstream>
+#include <fstream>
 
 // Networking includes
 #include <arpa/inet.h>
@@ -15,22 +19,49 @@
 #include <sys/epoll.h>
 #include <fcntl.h>
 
+// File storing time dilation factor (format: <factor> / 1000)
+#define DILATION_KNOB "/sys/kernel/sleep_dilation/dilation_factor"
+
+// Read time dilation factor and convert to double
+double read_dilation_factor() {
+    std::ifstream dilation_file(DILATION_KNOB);
+    if (!dilation_file.is_open()) {
+        std::cerr << "Failed to open dilation factor file: " << DILATION_KNOB << std::endl;
+        return 1.0; // Default to no dilation
+    }
+    double factor;
+    dilation_file >> factor;
+    if (dilation_file.fail()) {
+        std::cerr << "Failed to read dilation factor from file: " << DILATION_KNOB << std::endl;
+        return 1.0; // Default to no dilation
+    }
+    return factor / 1000.0; // Convert to double
+}
+
+
 // --- Configuration ---
 const char* HOST = "127.0.0.1";
 const int PORT = 11211;
-const long long READ_TARGET = 1000000;
-const long long WRITE_TARGET = 1000000;
+const long long DEFAULT_OPS_TARGET = 1000000;
 const std::string BENCHMARK_KEY = "microbench_key";
 const size_t DEFAULT_BUFFER_SIZE = 1;
 const size_t DEFAULT_VALUE_SIZE_KB = 1;
 
 // --- Shared State ---
 long long successful_reads = 0;
+long long failed_reads = 0; // New counter for failed reads
 long long successful_writes = 0;
 volatile bool stop_flag = false;
 
-// Represents a single in-flight request. Can be empty for this use case.
-struct InFlightMarker {};
+// Latency data will be collected here
+std::vector<double> read_latencies;
+std::vector<double> write_latencies;
+
+
+// Represents a single in-flight request.
+struct InFlightMarker {
+    std::chrono::high_resolution_clock::time_point send_time;
+};
 
 /**
  * @brief Sets a file descriptor to non-blocking mode.
@@ -100,8 +131,11 @@ int connect_to_memcached_nonblocking() {
 /**
  * @brief The task for the reader thread. Uses epoll and an in-flight buffer.
  * @param buffer_size The maximum number of requests to have in-flight.
+ * @param value_size The size of the value being read, for delay calculation.
+ * @param ops_target The number of operations to complete.
+ * @param inject_delays Whether to inject an artificial processing delay.
  */
-void reader_task(size_t buffer_size) {
+void reader_task(size_t buffer_size, size_t value_size, long long ops_target, bool inject_delays) {
     int sock_fd = connect_to_memcached_nonblocking();
     if (sock_fd == -1) {
         std::cerr << "Reader thread failed to connect." << std::endl;
@@ -131,21 +165,23 @@ void reader_task(size_t buffer_size) {
     std::string get_command = "get " + BENCHMARK_KEY + "\r\n";
     bool is_writable = true;
     long long reads_sent = 0;
+    bool target_sent = false;
 
-    // Loop while we haven't hit the send target OR while there are still requests to get responses for.
-    while ((!stop_flag && reads_sent < READ_TARGET) || !in_flight_queue.empty()) {
+    while (!target_sent || !in_flight_queue.empty()) {
         struct epoll_event events[1];
-        // If we are just draining, don't wait forever. A short timeout is fine.
-        int timeout = (!stop_flag && reads_sent < READ_TARGET) ? -1 : 100;
+        int timeout = (target_sent) ? 100 : -1;
         int n_events = epoll_wait(epoll_fd, events, 1, timeout);
         
         if (n_events < 0) {
             perror("reader epoll_wait");
             break;
         }
-        if (n_events == 0) { // Timeout occurred while draining
-            if(in_flight_queue.empty()) break;
+        if (n_events == 0) {
+            if (in_flight_queue.empty()) break;
             continue;
+        }
+        if (stop_flag) {
+            target_sent = true; // Stop sending if the other thread finished
         }
 
         if (events[0].events & EPOLLIN) {
@@ -159,11 +195,57 @@ void reader_task(size_t buffer_size) {
                 }
             }
             
-            size_t pos;
-            while ((pos = receive_buffer.find("END\r\n")) != std::string::npos) {
-                successful_reads++;
-                in_flight_queue.pop();
-                receive_buffer.erase(0, pos + 5);
+            // --- Robust Parsing Logic ---
+            while (!in_flight_queue.empty()) {
+                if (receive_buffer.rfind("VALUE", 0) == 0) {
+                    size_t line_end = receive_buffer.find("\r\n");
+                    if (line_end == std::string::npos) break; 
+
+                    std::stringstream ss(receive_buffer.substr(0, line_end));
+                    std::string v, k, f;
+                    size_t bytes;
+                    ss >> v >> k >> f >> bytes;
+
+                    // Parse response
+                    // header + \r\n + data + \r\n + END\r\n
+                    size_t expected_total_size = line_end + 2 + bytes + 2 + 5;
+                    if (receive_buffer.length() >= expected_total_size) {
+                        auto now = std::chrono::high_resolution_clock::now();
+                        auto& marker = in_flight_queue.front();
+                        std::chrono::duration<double, std::milli> latency = now - marker.send_time;
+                        
+                        read_latencies.push_back(latency.count());
+                        successful_reads++;
+
+                        if (inject_delays) {
+                            // Inject response delay (ns)
+                            // double dilation_factor = read_dilation_factor();
+                            double delay_factor = 12;
+                            double bias = -200;
+                            double coef = value_size + bias;
+                            double delay_ns = coef * delay_factor; // * dilation_factor;
+                            double start = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+                            double end = start;
+                            
+                            while (end - start < delay_ns) {
+                                end = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                    std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+                            }
+
+                        }
+                        in_flight_queue.pop();
+                        receive_buffer.erase(0, expected_total_size);
+                    } else {
+                        break; 
+                    }
+                } else if (receive_buffer.rfind("END\r\n", 0) == 0) {
+                    failed_reads++;
+                    in_flight_queue.pop();
+                    receive_buffer.erase(0, 5);
+                } else {
+                    break;
+                }
             }
         }
         
@@ -171,11 +253,14 @@ void reader_task(size_t buffer_size) {
             is_writable = true;
         }
 
-        // This loop now controls sending based on the number of requests SENT.
-        while (is_writable && !stop_flag && reads_sent < READ_TARGET && in_flight_queue.size() < buffer_size) {
+        while (is_writable && !target_sent && in_flight_queue.size() < buffer_size) {
             if (send(sock_fd, get_command.c_str(), get_command.length(), 0) > 0) {
-                in_flight_queue.push({});
+                in_flight_queue.push({std::chrono::high_resolution_clock::now()});
                 reads_sent++;
+                if (reads_sent >= ops_target) {
+                    target_sent = true;
+                    stop_flag = true;
+                }
             } else {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
                     is_writable = false;
@@ -185,15 +270,10 @@ void reader_task(size_t buffer_size) {
                 }
             }
         }
-        
-        // If this thread has finished sending all its requests, set the stop flag.
-        if (reads_sent >= READ_TARGET) {
-            stop_flag = true;
-        }
     }
 
 reader_cleanup:
-    stop_flag = true; // Ensure flag is set on error exit
+    stop_flag = true;
     close(sock_fd);
     close(epoll_fd);
 }
@@ -202,8 +282,9 @@ reader_cleanup:
  * @brief The task for the writer thread. Uses epoll and an in-flight buffer.
  * @param buffer_size The maximum number of requests to have in-flight.
  * @param value_size The size of the value to write.
+ * @param ops_target The number of operations to complete.
  */
-void writer_task(size_t buffer_size, size_t value_size) {
+void writer_task(size_t buffer_size, size_t value_size, long long ops_target) {
     int sock_fd = connect_to_memcached_nonblocking();
     if (sock_fd == -1) {
         std::cerr << "Writer thread failed to connect." << std::endl;
@@ -233,11 +314,11 @@ void writer_task(size_t buffer_size, size_t value_size) {
     std::string update_value(value_size, 'A');
     bool is_writable = true;
     long long writes_sent = 0;
+    bool target_sent = false;
 
-    // Loop while we haven't hit the send target OR while there are still requests to get responses for.
-    while ((!stop_flag && writes_sent < WRITE_TARGET) || !in_flight_queue.empty()) {
+    while (!target_sent || !in_flight_queue.empty()) {
         struct epoll_event events[1];
-        int timeout = (!stop_flag && writes_sent < WRITE_TARGET) ? -1 : 100;
+        int timeout = (target_sent) ? 100 : -1;
         int n_events = epoll_wait(epoll_fd, events, 1, timeout);
 
         if (n_events < 0) {
@@ -247,6 +328,10 @@ void writer_task(size_t buffer_size, size_t value_size) {
         if (n_events == 0) {
             if(in_flight_queue.empty()) break;
             continue;
+        }
+        
+        if (stop_flag) {
+            target_sent = true; // Stop sending if the other thread finished
         }
 
         if (events[0].events & EPOLLIN) {
@@ -262,7 +347,13 @@ void writer_task(size_t buffer_size, size_t value_size) {
             
             size_t pos;
             while ((pos = receive_buffer.find("STORED\r\n")) != std::string::npos) {
+                auto now = std::chrono::high_resolution_clock::now();
+                auto& marker = in_flight_queue.front();
+                std::chrono::duration<double, std::milli> latency = now - marker.send_time;
+
+                write_latencies.push_back(latency.count());
                 successful_writes++;
+                
                 in_flight_queue.pop();
                 receive_buffer.erase(0, pos + 8);
             }
@@ -272,12 +363,16 @@ void writer_task(size_t buffer_size, size_t value_size) {
             is_writable = true;
         }
 
-        while (is_writable && !stop_flag && writes_sent < WRITE_TARGET && in_flight_queue.size() < buffer_size) {
+        while (is_writable && !target_sent && in_flight_queue.size() < buffer_size) {
             update_value[0]++;
             std::string replace_command = "replace " + BENCHMARK_KEY + " 0 0 " + std::to_string(update_value.length()) + "\r\n" + update_value + "\r\n";
             if (send(sock_fd, replace_command.c_str(), replace_command.length(), 0) > 0) {
-                in_flight_queue.push({});
+                in_flight_queue.push({std::chrono::high_resolution_clock::now()});
                 writes_sent++;
+                if (writes_sent >= ops_target) {
+                    target_sent = true;
+                    stop_flag = true;
+                }
             } else {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
                     is_writable = false;
@@ -286,10 +381,6 @@ void writer_task(size_t buffer_size, size_t value_size) {
                     goto writer_cleanup;
                 }
             }
-        }
-        
-        if (writes_sent >= WRITE_TARGET) {
-            stop_flag = true;
         }
     }
 
@@ -302,20 +393,65 @@ writer_cleanup:
 void print_usage(const char* prog_name) {
     std::cerr << "Usage: " << prog_name << " [options]\n\n"
               << "Options:\n"
+              << "  --requests <N>       Set the number of operations for the winning thread (default: " << DEFAULT_OPS_TARGET << ").\n"
               << "  --buffer_size <N>    Set the in-flight buffer size for each thread (default: " << DEFAULT_BUFFER_SIZE << ").\n"
-              << "  --value_size_kb <N>  Set the size of the memcached value in KB (default: " << DEFAULT_VALUE_SIZE_KB << ").\n"
+              << "  --item_size <N>      Set the size of the memcached value in KB (default: " << DEFAULT_VALUE_SIZE_KB << ").\n"
+              << "  --inject_delays      Enable artificial client-side processing delays in the reader thread.\n"
               << "  -h, --help           Display this help message.\n";
 }
 
+void print_latency_stats(const std::string& name, std::vector<double>& latencies) {
+    if (latencies.empty()) {
+        std::cout << "No " << name << " latencies recorded." << std::endl;
+        return;
+    }
+
+    std::sort(latencies.begin(), latencies.end());
+    
+    double sum = 0.0;
+    for(double val : latencies) {
+        sum += val;
+    }
+    double average = sum / latencies.size();
+
+    double p90 = latencies[static_cast<size_t>(std::ceil(0.90 * latencies.size())) - 1];
+    double p99 = latencies[static_cast<size_t>(std::ceil(0.99 * latencies.size())) - 1];
+    double p999 = latencies[static_cast<size_t>(std::ceil(0.999 * latencies.size())) - 1];
+
+    std::cout << "\n--- " << name << " Latency (ms) ---\n";
+    std::cout << "Average: " << average << "\n";
+    std::cout << "p90:     " << p90 << "\n";
+    std::cout << "p99:     " << p99 << "\n";
+    std::cout << "p99.9:   " << p999 << std::endl;
+}
+
 int main(int argc, char* argv[]) {
+    long long ops_target = DEFAULT_OPS_TARGET;
     size_t buffer_size = DEFAULT_BUFFER_SIZE;
     size_t value_size_kb = DEFAULT_VALUE_SIZE_KB;
+    bool inject_delays = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "-h" || arg == "--help") {
             print_usage(argv[0]);
             return 0;
+        } else if (arg == "--inject_delays") {
+            inject_delays = true;
+        } else if (arg == "--requests") {
+            if (i + 1 < argc) {
+                try {
+                    ops_target = std::stoll(argv[++i]);
+                } catch(const std::exception& e) {
+                    std::cerr << "Error: Invalid number for --requests." << std::endl;
+                    print_usage(argv[0]);
+                    return 1;
+                }
+            } else {
+                std::cerr << "Error: --requests requires an argument." << std::endl;
+                print_usage(argv[0]);
+                return 1;
+            }
         } else if (arg == "--buffer_size") {
             if (i + 1 < argc) {
                 try {
@@ -330,17 +466,17 @@ int main(int argc, char* argv[]) {
                 print_usage(argv[0]);
                 return 1;
             }
-        } else if (arg == "--value_size_kb") {
+        } else if (arg == "--item_size") {
             if (i + 1 < argc) {
                 try {
                     value_size_kb = std::stoul(argv[++i]);
                 } catch(const std::exception& e) {
-                    std::cerr << "Error: Invalid number for --value_size_kb." << std::endl;
+                    std::cerr << "Error: Invalid number for --item_size." << std::endl;
                     print_usage(argv[0]);
                     return 1;
                 }
             } else {
-                std::cerr << "Error: --value_size_kb requires an argument." << std::endl;
+                std::cerr << "Error: --item_size requires an argument." << std::endl;
                 print_usage(argv[0]);
                 return 1;
             }
@@ -351,8 +487,13 @@ int main(int argc, char* argv[]) {
         }
     }
     size_t value_size_bytes = value_size_kb * 1024;
+    std::cout << "Using target operations: " << ops_target << std::endl;
     std::cout << "Using in-flight buffer size: " << buffer_size << std::endl;
     std::cout << "Using value size: " << value_size_kb << " KB (" << value_size_bytes << " bytes)" << std::endl;
+    if (inject_delays) {
+        std::cout << "Artificial reader delays are ENABLED." << std::endl;
+    }
+
 
     // --- SETUP ---
     // Assuming the server is in a clean state.
@@ -378,12 +519,16 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "Initialization complete." << std::endl;
 
+    // Pre-allocate memory to avoid reallocations during the benchmark
+    read_latencies.reserve(ops_target);
+    write_latencies.reserve(ops_target);
+
     // --- BENCHMARK EXECUTION ---
-    std::cout << "Starting benchmark. Running until " << READ_TARGET << " reads or " << WRITE_TARGET << " writes occur..." << std::endl;
+    std::cout << "Starting benchmark. Running until " << ops_target << " reads or " << ops_target << " writes occur..." << std::endl;
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    std::thread reader_thread(reader_task, buffer_size);
-    std::thread writer_thread(writer_task, buffer_size, value_size_bytes);
+    std::thread reader_thread(reader_task, buffer_size, value_size_bytes, ops_target, inject_delays);
+    std::thread writer_thread(writer_task, buffer_size, value_size_bytes, ops_target);
 
     reader_thread.join();
     writer_thread.join();
@@ -396,11 +541,18 @@ int main(int argc, char* argv[]) {
     std::cout << "Total duration: " << duration.count() << " seconds" << std::endl;
     
     std::cout << "Successful reads:  " << successful_reads << std::endl;
+    std::cout << "Failed reads:      " << failed_reads << std::endl;
     std::cout << "Successful writes: " << successful_writes << std::endl;
     
     long long difference = successful_reads - successful_writes;
     std::cout << "Difference (#Reads - #Writes): " << difference << std::endl;
+    double ratio = (successful_writes > 0) ?
+            static_cast<double>(successful_reads) / successful_writes : 0.0;
+    std::cout << "Read/Write Ratio:  " << ratio << std::endl;
     
+    print_latency_stats("Read", read_latencies);
+    print_latency_stats("Write", write_latencies);
+
     // --- CLEANUP ---
     std::cout << "\nCleaning up benchmark key..." << std::endl;
     int cleanup_sock = connect_to_memcached_blocking();
