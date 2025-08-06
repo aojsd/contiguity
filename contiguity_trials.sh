@@ -45,7 +45,7 @@ run_and_capture_pid() {
             local pr_root="/home/michael/software/gapbs"
             app_cmd="${pr_root}/pr -f ${pr_root}/benchmark/graphs/twitter.sg -n 1"
             ;;
-        *memcached*)
+        *memcached*|*sync_microbench*)
             IP="127.0.0.1"
             ARGS="-p 11211 -l ${IP} -m 16384 -u michael"
             app_cmd="/home/michael/software/memcached/memcached ${ARGS}"
@@ -142,7 +142,8 @@ prepare_remote_system() {
     # Create a string of all setup commands to run in a single SSH session.
     # This makes it easy to add, remove, or comment out individual steps.
     echo "Applying fragmentation, kernel, and system settings..."
-    local post_reboot_cmds="set -x;" # Start with set -x for debugging
+    # local post_reboot_cmds="set -x;" # Start with set -x for debugging
+    local post_reboot_cmds=""
 
     # Fragment system if requested
     local random_freelist_arg="0" # Default to 0 (no random freelist)
@@ -199,7 +200,7 @@ prepare_remote_system() {
     post_reboot_cmds+="sudo /home/michael/ssd/drop_cache.sh;"
 
     # Execute the entire command string in one go
-    post_reboot_cmds+="set +x;"
+    # post_reboot_cmds+="set +x;"
     ssh "${remote_host}" "${post_reboot_cmds}"
 
     # --- Step 4: Local Variable and Background Process ---
@@ -413,6 +414,38 @@ for i in $(seq 1 "$NUM_TRIALS"); do
             ssh "${REMOTE_HOST}" "echo '${MAX_CPU} 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
         fi
         ssh "${REMOTE_HOST}" "${RQ_PROG} ${RQ_FILE} --live | tee /home/michael/ISCA_2025_results/tmp/${NAME}.rq"
+
+    elif [[ $APP_NAME == sync_microbench* ]]; then
+        # --- Sync Microbenchmark Path ---
+        if [ "$CPU_LIMIT" != "0" ]; then
+            ssh "${REMOTE_HOST}" "echo '${MAX_CPU} 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
+        fi
+
+        # Parse item size
+        ITEM_SIZE=1
+        N_REQ=1000000
+        if [[ $APP_NAME =~ sync_microbench_([1-9][0-9]*)$ ]]; then
+            # Extract the captured number from the BASH_REMATCH array
+            ITEM_SIZE="${BASH_REMATCH[1]}"
+        fi
+
+        # Specific large microbenchmark
+        if [[ $APP_NAME == sync_microbench_large* ]]; then
+            ITEM_SIZE=32
+            N_REQ=100000
+        fi
+        SYNC_ARGS="--item_size ${ITEM_SIZE} --requests ${N_REQ}"
+
+        # Add --inject_delays argument if the pin mode is not 'native'
+        # if [ "$PIN_MODE" != "native" ]; then
+        #     SYNC_ARGS+=" --inject_delays"
+        # fi
+
+        # Run the sync microbenchmark
+        sleep 5
+        ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./sync_microbench ${SYNC_ARGS} | tee /home/michael/ISCA_2025_results/tmp/sync_data.out"
+        sleep 5
+    
     else
         # --- Generic Application Path ---
         if [ "$CPU_LIMIT" != "0" ]; then
@@ -429,7 +462,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     # 3. CLEAN UP remote processes
     echo "--- Halting remote processes ---"
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f perf"
-    if [[ $APP_NAME == mem* ]]; then
+    if [[ $APP_NAME == mem* ]] || [[ $APP_NAME == sync_microbench* ]]; then
         ssh "${REMOTE_HOST}" "sudo pkill -2 -f /home/michael/software/memcached/memcached"
     fi
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f kthread_cputime.bt"
@@ -448,29 +481,38 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     echo "--- Collecting and processing results ---"
     P_SRC_CONTIG="${CONTIGUITY}/src/python"
     ssh "${REMOTE_HOST}" "python3 ${P_SRC_CONTIG}/check_ptables.py /home/michael/ISCA_2025_results/tmp/ptables >> /home/michael/ISCA_2025_results/tmp/${NAME}.perf"
-    
     ssh "${REMOTE_HOST}" "echo -n 'Trace directory size: '; du -sh /home/michael/ssd/scratch/${APP}_tmp/"
-    
     TMP_DIR="/home/michael/ISCA_2025_results/tmp"
+    
+    # Get output files
     scp "${REMOTE_HOST}:${TMP_DIR}/${PIN_MODE}.txt"              "${OUTDIR}/${PIN_MODE}_${i}.txt"
     scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.out"                   "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}.out"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.perf"                 "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}.perf"
-    scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}_threads.perf"         "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}_threads.perf"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.kthread_cputime"      "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.kthread_cputime"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.syscalls"             "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.syscalls"
+    
+    # Memcached-specific files
     if [[ $APP_NAME == mem* ]]; then
         scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.packets"          "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.packets"
         scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.rq"               "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}.rq"
     fi
+
+    # Sync_microbenchmark
+    if [[ $APP_NAME == sync_microbench* ]]; then
+        scp "${REMOTE_HOST}:${TMP_DIR}/sync_data.out"            "${OUTDIR}/sync_data_${PIN_MODE}_${i}.out"
+    fi
+
+    # Distribution of memory accesses
     if [ "$DIST" == "1" ]; then
         scp "${REMOTE_HOST}:${TMP_DIR}/${APP}.dist" "${DIST_OUT_DIR}/${APP}_${PIN_MODE}_dist_${i}.txt"
     fi
-    if [ "$BBLOCK_ONLY" == "1" ]; then
-        scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.bblocks" "${OUTDIR}/${NAME}_bblocks_${i}.txt"
-    fi
+
+    # Consumer log for no-cache modes
     if [ "$NOCACHE" == "1" ]; then
         scp "${REMOTE_HOST}:${TMP_DIR}/consumer.log" "${OUTDIR}/consumer_${APP}_${PIN_MODE}_${i}.log"
     fi
+
+    # Page table snapshots
     rm -rf "${OUTDIR}/ptables_${i}"
     ssh "${REMOTE_HOST}" "rm -f ${TMP_DIR}/ptables/pagemap"
     scp -r "${REMOTE_HOST}:${TMP_DIR}/ptables" "${PTABLE_DIR}/ptables_${i}"
