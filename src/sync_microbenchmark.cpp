@@ -201,10 +201,22 @@ void process_incoming_reads(int sock_fd, std::string& receive_buffer, std::queue
                 successful_reads++;
 
                 if (inject_delays) {
-                    double delay_factor = 12;
-                    double bias = -200;
-                    double coef = value_size + bias;
-                    double delay_ns = coef * delay_factor;
+                    // Delay structure:
+                    //  1. Constant added to account for instrumentation overheads on all GETs
+                    //  2. Linear factor between 8KB - 16KB to handle change in memcpy() instrumentation
+                    //      - Does not kick in under 8KB, does not increase after 16KB
+                    const double const_offset = 50000; // 50us constant overhead
+                    const double offset_8KB = 100000; // extra 100us when reaching 8KB
+                    const double coef = 17.5; // 17.5ns per byte between 8KB and 16KB
+
+                    // Calculate delay based on value size
+                    double delay_ns = const_offset;
+                    if (value_size > 8192) {
+                        delay_ns += offset_8KB;
+                        double ceil_diff = std::min(value_size - 8192, (ulong)8192);
+                        delay_ns += coef * ceil_diff;
+                    }
+
                     auto start = std::chrono::high_resolution_clock::now();
                     while (std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start).count() < delay_ns);
                 }
