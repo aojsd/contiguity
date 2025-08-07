@@ -23,14 +23,7 @@
 #include <fcntl.h>
 #include <sys/un.h> // Include for Unix domain sockets
 
-// Delay injection parameters
-// Delay structure:
-//  1. Constant added to account for instrumentation overheads on all GETs
-//  2. Linear factor between 8KB - 16KB to handle change in memcpy() instrumentation
-//      - Does not kick in under 8KB, does not increase after 16KB
-const double const_offset = 50000; // 50us constant overhead
-const double offset_8KB = 100000; // extra 100us when reaching 8KB
-const double coef = 17.5; // 17.5ns per byte between 8KB and 16KB
+// Delay injection value
 double delay_ns = 0.0; // This will be set when the value size is known
 
 // File storing time dilation factor (format: <factor> / 1000)
@@ -492,6 +485,14 @@ int main(int argc, char* argv[]) {
     std::cout << "Using in-flight buffer size: " << buffer_size << std::endl;
     std::cout << "Using value size: " << value_size_kb << " KB (" << value_size_bytes << " bytes)" << std::endl;
     if (inject_delays) {
+        // Delay structure:
+        //  1. Constant added to account for instrumentation overheads on all GETs
+        //  2. Linear factor between 8KB - 16KB to handle change in memcpy() instrumentation
+        //      - Does not kick in under 8KB, does not increase after 16KB
+        const double const_offset = 10000; // constant delay offset for all sizes
+        const double offset_8KB = 1000000; // extra delay when reaching 8KB
+        const double coef = 25; // extra delay per byte between 8KB and 16KB
+
         // Calculate delay based on value size
         delay_ns = const_offset;
         if (value_size_kb > 8192) {
