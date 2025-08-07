@@ -23,6 +23,16 @@
 #include <fcntl.h>
 #include <sys/un.h> // Include for Unix domain sockets
 
+// Delay injection parameters
+// Delay structure:
+//  1. Constant added to account for instrumentation overheads on all GETs
+//  2. Linear factor between 8KB - 16KB to handle change in memcpy() instrumentation
+//      - Does not kick in under 8KB, does not increase after 16KB
+const double const_offset = 50000; // 50us constant overhead
+const double offset_8KB = 100000; // extra 100us when reaching 8KB
+const double coef = 17.5; // 17.5ns per byte between 8KB and 16KB
+double delay_ns = 0.0; // This will be set when the value size is known
+
 // File storing time dilation factor (format: <factor> / 1000)
 #define DILATION_KNOB "/sys/kernel/sleep_dilation/dilation_factor"
 
@@ -62,6 +72,7 @@ volatile bool stop_flag = false;
 // Latency data will be collected here
 std::vector<double> read_latencies;
 std::vector<double> write_latencies;
+std::vector<double> delay_latencies; // For injected delays
 std::mutex latencies_mutex; // Mutex to protect latency vectors
 
 // Represents a single in-flight request.
@@ -194,31 +205,21 @@ void process_incoming_reads(int sock_fd, std::string& receive_buffer, std::queue
                 auto& marker = in_flight_queue.front();
                 std::chrono::duration<double, std::milli> latency = now - marker.send_time;
                 
-                {
-                    std::lock_guard<std::mutex> lock(latencies_mutex);
-                    read_latencies.push_back(latency.count());
-                }
+                read_latencies.push_back(latency.count());
                 successful_reads++;
 
                 if (inject_delays) {
-                    // Delay structure:
-                    //  1. Constant added to account for instrumentation overheads on all GETs
-                    //  2. Linear factor between 8KB - 16KB to handle change in memcpy() instrumentation
-                    //      - Does not kick in under 8KB, does not increase after 16KB
-                    const double const_offset = 50000; // 50us constant overhead
-                    const double offset_8KB = 100000; // extra 100us when reaching 8KB
-                    const double coef = 17.5; // 17.5ns per byte between 8KB and 16KB
-
-                    // Calculate delay based on value size
-                    double delay_ns = const_offset;
-                    if (value_size > 8192) {
-                        delay_ns += offset_8KB;
-                        double ceil_diff = std::min(value_size - 8192, (ulong)8192);
-                        delay_ns += coef * ceil_diff;
+                    // Get time in ns
+                    double start = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                        std::chrono::high_resolution_clock::now().time_since_epoch()
+                                        ).count();
+                    double end = start;
+                    while (end - start < delay_ns) {
+                        end = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::high_resolution_clock::now().time_since_epoch()
+                                ).count();
                     }
-
-                    auto start = std::chrono::high_resolution_clock::now();
-                    while (std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start).count() < delay_ns);
+                    delay_latencies.push_back((end - start) / 1e6); // Store delay in ms
                 }
                 in_flight_queue.pop();
                 receive_buffer.erase(0, expected_total_size);
@@ -317,10 +318,7 @@ void process_incoming_writes(int sock_fd, std::string& receive_buffer, std::queu
         auto now = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> latency = now - marker.send_time;
 
-        {
-            std::lock_guard<std::mutex> lock(latencies_mutex);
-            write_latencies.push_back(latency.count());
-        }
+        write_latencies.push_back(latency.count());
         successful_writes++;
         
         in_flight_queue.pop();
@@ -494,7 +492,15 @@ int main(int argc, char* argv[]) {
     std::cout << "Using in-flight buffer size: " << buffer_size << std::endl;
     std::cout << "Using value size: " << value_size_kb << " KB (" << value_size_bytes << " bytes)" << std::endl;
     if (inject_delays) {
-        std::cout << "Artificial reader delays are ENABLED." << std::endl;
+        // Calculate delay based on value size
+        delay_ns = const_offset;
+        if (value_size_kb > 8192) {
+            delay_ns += offset_8KB;
+            double ceil_diff = std::min(value_size_kb - 8192, (ulong)8192);
+            delay_ns += coef * ceil_diff;
+        }
+        double delay_ms = delay_ns / 1e6; // Convert to milliseconds
+        std::cout << "Artificial reader delays are ENABLED: " << delay_ms << " ms per read." << std::endl;
     }
 
 
@@ -530,6 +536,7 @@ int main(int argc, char* argv[]) {
 
     read_latencies.reserve(ops_target);
     write_latencies.reserve(ops_target);
+    delay_latencies.reserve(ops_target); // Reserve space for delay latencies
 
     // --- BENCHMARK EXECUTION ---
     std::cout << "Starting benchmark. Running until " << ops_target << " reads or " << ops_target << " writes occur..." << std::endl;
@@ -560,6 +567,9 @@ int main(int argc, char* argv[]) {
     
     print_latency_stats("Read", read_latencies);
     print_latency_stats("Write", write_latencies);
+    if (inject_delays) {
+        print_latency_stats("Delay", delay_latencies);
+    }
 
     // --- CLEANUP ---
     std::cout << "\nCleaning up benchmark key..." << std::endl;
