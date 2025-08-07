@@ -45,9 +45,15 @@ run_and_capture_pid() {
             local pr_root="/home/michael/software/gapbs"
             app_cmd="${pr_root}/pr -f ${pr_root}/benchmark/graphs/twitter.sg -n 1"
             ;;
-        *memcached*|*sync_microbench*)
+        *memcached*)
             IP="127.0.0.1"
             ARGS="-p 11211 -l ${IP} -m 16384 -u michael"
+            app_cmd="/home/michael/software/memcached/memcached ${ARGS}"
+            ;;
+        *sync_microbench*)
+            # Use UNIX domain socket for memcached
+            SOCKET="/home/michael/ISCA_2025_results/tmp/sync_microbench.sock"
+            ARGS="-s ${SOCKET} -u michael -a 0777"
             app_cmd="/home/michael/software/memcached/memcached ${ARGS}"
             ;;
         *)
@@ -124,7 +130,7 @@ prepare_remote_system() {
     pre_reboot_cmds+="rm -rf /home/michael/ssd/scratch/*; "
     pre_reboot_cmds+="rm -rf /home/michael/ISCA_2025_results/tmp/*; "
     pre_reboot_cmds+="mkdir -p /home/michael/ssd/scratch/${APP}_tmp/; "
-    pre_reboot_cmds+="sudo /home/michael/ssd/drop_cache.sh; "
+    pre_reboot_cmds+="sudo /home/michael/ssd/drop_cache.sh > /dev/null; "
     
     echo "Cleaning up remote directories..."
     ssh "${remote_host}" "${pre_reboot_cmds}"
@@ -151,7 +157,7 @@ prepare_remote_system() {
         random_freelist_arg="1" # Fragmentation implies random freelist
         post_reboot_cmds+="cd ${CONTIGUITY}; ./kern_fragment.sh 1 ${FRAGMENT} 100; ./kern_fragment.sh 0; "
     fi
-    post_reboot_cmds+="${CONTIGUITY}/random_freelist.sh ${random_freelist_arg}; "
+    post_reboot_cmds+="${CONTIGUITY}/random_freelist.sh ${random_freelist_arg} > /dev/null; "
 
     # Apply system settings
     if [ "$THP" == "1" ]; then
@@ -197,7 +203,7 @@ prepare_remote_system() {
     post_reboot_cmds+="sudo chown -R michael:michael /sys/fs/cgroup/pin; "
 
     # Drop caches right before the run
-    post_reboot_cmds+="sudo /home/michael/ssd/drop_cache.sh;"
+    post_reboot_cmds+="sudo /home/michael/ssd/drop_cache.sh > /dev/null;"
 
     # Execute the entire command string in one go
     # post_reboot_cmds+="set +x;"
