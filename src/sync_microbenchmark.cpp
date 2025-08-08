@@ -23,8 +23,12 @@
 #include <fcntl.h>
 #include <sys/un.h> // Include for Unix domain sockets
 
-// Delay injection value
-double delay_ns = 0.0; // This will be set when the value size is known
+// --- Global Flags & Variables ---
+// Delay injection value in nanoseconds
+double delay_ns = 0.0;
+
+// Scaling factor for injected delays. Set via command line.
+double dilation_scaling_factor = 0.0;
 
 // File storing time dilation factor (format: <factor> / 1000)
 #define DILATION_KNOB "/sys/kernel/sleep_dilation/dilation_factor"
@@ -32,20 +36,26 @@ double delay_ns = 0.0; // This will be set when the value size is known
 // Unix domain socket path
 #define UNIX_SOCKET_PATH "/home/michael/ISCA_2025_results/tmp/sync_microbench.sock"
 
-// Read time dilation factor and convert to double
+/**
+ * @brief Reads the system's time dilation factor from a kernel file.
+ * @return The dilation factor as a double. Defaults to 1.0 if file cannot be read.
+ */
 double read_dilation_factor() {
     std::ifstream dilation_file(DILATION_KNOB);
     if (!dilation_file.is_open()) {
-        std::cerr << "Failed to open dilation factor file: " << DILATION_KNOB << std::endl;
-        return 1.0; // Default to no dilation
+        // This is not a fatal error, as the system may not have the knob.
+        // We can just return 1.0 for no dilation.
+        return 1.0;
     }
-    double factor;
+    uint factor;
     dilation_file >> factor;
     if (dilation_file.fail()) {
-        std::cerr << "Failed to read dilation factor from file: " << DILATION_KNOB << std::endl;
+        std::cerr << "Warning: Failed to read dilation factor from file: " << DILATION_KNOB << std::endl;
         return 1.0; // Default to no dilation
     }
-    return factor / 1000.0; // Convert to double
+
+    // This specific calculation might be tuned for a particular environment.
+    return (double) factor / 1000.0;
 }
 
 
@@ -65,7 +75,7 @@ volatile bool stop_flag = false;
 // Latency data will be collected here
 std::vector<double> read_latencies;
 std::vector<double> write_latencies;
-std::vector<double> delay_latencies; // For injected delays
+std::vector<double> delayed_read_latencies; // For injected delays
 std::mutex latencies_mutex; // Mutex to protect latency vectors
 
 // Represents a single in-flight request.
@@ -167,8 +177,9 @@ void send_all(int fd, const std::string& data) {
  * @param in_flight_queue The queue of in-flight requests.
  * @param value_size The expected size of the value for latency injection.
  * @param inject_delays Whether to inject artificial delays.
+ * @param scaling_factor The factor to scale the delay by.
  */
-void process_incoming_reads(int sock_fd, std::string& receive_buffer, std::queue<InFlightMarker>& in_flight_queue, size_t value_size, bool inject_delays) {
+void process_incoming_reads(int sock_fd, std::string& receive_buffer, std::queue<InFlightMarker>& in_flight_queue, size_t value_size, bool inject_delays, double scaling_factor) {
     char read_buf[READ_BUFFER_SIZE];
     while (true) {
         ssize_t count = read(sock_fd, read_buf, sizeof(read_buf));
@@ -202,17 +213,27 @@ void process_incoming_reads(int sock_fd, std::string& receive_buffer, std::queue
                 successful_reads++;
 
                 if (inject_delays) {
-                    // Get time in ns
+                    // *** MODIFICATION HERE ***
+                    // Start with the base delay.
+                    double final_delay_ns = delay_ns;
+
+                    // If a command-line scaling factor is provided, apply it AND the system dilation factor.
+                    if (scaling_factor > 0.0) {
+                        double system_dilation = read_dilation_factor();
+                        final_delay_ns *= system_dilation * scaling_factor;
+                    }
+
                     double start = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                         std::chrono::high_resolution_clock::now().time_since_epoch()
                                         ).count();
                     double end = start;
-                    while (end - start < delay_ns) {
+                    
+                    while (end - start < final_delay_ns) {
                         end = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                 std::chrono::high_resolution_clock::now().time_since_epoch()
                                 ).count();
                     }
-                    delay_latencies.push_back((end - start) / 1e6); // Store delay in ms
+                    delayed_read_latencies.push_back(((end - start) / 1e6) + latency.count()); // Store delay in ms
                 }
                 in_flight_queue.pop();
                 receive_buffer.erase(0, expected_total_size);
@@ -230,9 +251,9 @@ void process_incoming_reads(int sock_fd, std::string& receive_buffer, std::queue
 }
 
 /**
- * @brief The task for the reader thread, now in a single-threaded loop.
+ * @brief The task for the reader thread.
  */
-void reader_task(size_t buffer_size, size_t value_size, long long ops_target, bool inject_delays) {
+void reader_task(size_t buffer_size, size_t value_size, long long ops_target, bool inject_delays, double scaling_factor) {
     try {
         int sock_fd = connect_to_memcached_nonblocking();
         if (sock_fd == -1) throw std::runtime_error("Reader thread failed to connect.");
@@ -266,7 +287,7 @@ void reader_task(size_t buffer_size, size_t value_size, long long ops_target, bo
             struct epoll_event events[1];
             int n_events = epoll_wait(epoll_fd, events, 1, 0); // 0 timeout for non-blocking check
             if (n_events > 0) {
-                process_incoming_reads(sock_fd, receive_buffer, in_flight_queue, value_size, inject_delays);
+                process_incoming_reads(sock_fd, receive_buffer, in_flight_queue, value_size, inject_delays, scaling_factor);
             }
         }
         
@@ -275,7 +296,7 @@ void reader_task(size_t buffer_size, size_t value_size, long long ops_target, bo
             struct epoll_event events[1];
             int n_events = epoll_wait(epoll_fd, events, 1, 100); // 100ms timeout
             if (n_events > 0) {
-                process_incoming_reads(sock_fd, receive_buffer, in_flight_queue, value_size, inject_delays);
+                process_incoming_reads(sock_fd, receive_buffer, in_flight_queue, value_size, inject_delays, scaling_factor);
             }
         }
 
@@ -320,7 +341,7 @@ void process_incoming_writes(int sock_fd, std::string& receive_buffer, std::queu
 }
 
 /**
- * @brief The task for the writer thread, now in a single-threaded loop.
+ * @brief The task for the writer thread.
  */
 void writer_task(size_t buffer_size, size_t value_size, long long ops_target) {
     try {
@@ -380,11 +401,12 @@ void writer_task(size_t buffer_size, size_t value_size, long long ops_target) {
 void print_usage(const char* prog_name) {
     std::cerr << "Usage: " << prog_name << " [options]\n\n"
               << "Options:\n"
-              << "  --requests <N>       Set the number of operations for the winning thread (default: " << DEFAULT_OPS_TARGET << ").\n"
-              << "  --buffer_size <N>    Set the in-flight buffer size for each thread (default: " << DEFAULT_BUFFER_SIZE << ").\n"
-              << "  --item_size <N>      Set the size of the memcached value in KB (default: " << DEFAULT_VALUE_SIZE_KB << ").\n"
-              << "  --inject_delays      Enable artificial client-side processing delays in the reader thread.\n"
-              << "  -h, --help           Display this help message.\n";
+              << "  --requests <N>           Set the number of operations for the winning thread (default: " << DEFAULT_OPS_TARGET << ").\n"
+              << "  --buffer_size <N>        Set the in-flight buffer size for each thread (default: " << DEFAULT_BUFFER_SIZE << ").\n"
+              << "  --item_size <N>          Set the size of the memcached value in KB (default: " << DEFAULT_VALUE_SIZE_KB << ").\n"
+              << "  --inject_delays          Enable artificial client-side processing delays in the reader thread.\n"
+              << "  --dilation_scaling <S>   Set a scaling factor for injected delays (default: 0.0, no scaling).\n"
+              << "  -h, --help               Display this help message.\n";
 }
 
 void print_latency_stats(const std::string& name, std::vector<double>& latencies) {
@@ -432,6 +454,20 @@ int main(int argc, char* argv[]) {
             return 0;
         } else if (arg == "--inject_delays") {
             inject_delays = true;
+        } else if (arg == "--dilation_scaling") {
+            if (i + 1 < argc) {
+                try {
+                    dilation_scaling_factor = std::stod(argv[++i]);
+                } catch(const std::exception& e) {
+                    std::cerr << "Error: Invalid number for --dilation_scaling." << std::endl;
+                    print_usage(argv[0]);
+                    return 1;
+                }
+            } else {
+                std::cerr << "Error: --dilation_scaling requires an argument." << std::endl;
+                print_usage(argv[0]);
+                return 1;
+            }
         } else if (arg == "--requests") {
             if (i + 1 < argc) {
                 try {
@@ -487,21 +523,30 @@ int main(int argc, char* argv[]) {
     if (inject_delays) {
         // Delay structure:
         //  1. Constant added to account for instrumentation overheads on all GETs
-        //  2. Linear factor between 8KB - 16KB to handle change in memcpy() instrumentation
+        //  2. Delay proportional to value size
+        //  3. Linear factor between 8KB - 16KB to handle change in memcpy() instrumentation
         //      - Does not kick in under 8KB, does not increase after 16KB
-        const double const_offset = 10000; // constant delay offset for all sizes
-        const double offset_8KB = 1000000; // extra delay when reaching 8KB
-        const double coef = 25; // extra delay per byte between 8KB and 16KB
+        const double const_offset = 4000; // constant delay offset for all sizes
+        const double offset_8KB = 100000; // extra delay when reaching 8KB
+        const double offset_16KB = 80000; // extra delay per byte between 8KB and 16KB
+        const double coef = 0.5; // ns of delay per byte, only apply this before 8KB
 
         // Calculate delay based on value size
         delay_ns = const_offset;
-        if (value_size_kb > 8192) {
+        if (value_size_bytes < 8192) {
+            delay_ns += coef * value_size_bytes;
+        }
+        if (value_size_bytes >= 8192) {
             delay_ns += offset_8KB;
-            double ceil_diff = std::min(value_size_kb - 8192, (ulong)8192);
-            delay_ns += coef * ceil_diff;
+        }
+        if (value_size_bytes >= 16384) {
+            delay_ns += offset_16KB;
         }
         double delay_ms = delay_ns / 1e6; // Convert to milliseconds
         std::cout << "Artificial reader delays are ENABLED: " << delay_ms << " ms per read." << std::endl;
+        if (dilation_scaling_factor > 0.0) {
+            std::cout << "Dilation scaling is ENABLED with factor: " << dilation_scaling_factor << std::endl;
+        }
     }
 
 
@@ -537,13 +582,14 @@ int main(int argc, char* argv[]) {
 
     read_latencies.reserve(ops_target);
     write_latencies.reserve(ops_target);
-    delay_latencies.reserve(ops_target); // Reserve space for delay latencies
+    delayed_read_latencies.reserve(ops_target); // Reserve space for delay latencies
 
     // --- BENCHMARK EXECUTION ---
     std::cout << "Starting benchmark. Running until " << ops_target << " reads or " << ops_target << " writes occur..." << std::endl;
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    std::thread reader_thread(reader_task, buffer_size, value_size_bytes, ops_target, inject_delays);
+    // Pass the new scaling factor to the reader thread
+    std::thread reader_thread(reader_task, buffer_size, value_size_bytes, ops_target, inject_delays, dilation_scaling_factor);
     std::thread writer_thread(writer_task, buffer_size, value_size_bytes, ops_target);
 
     reader_thread.join();
@@ -566,11 +612,12 @@ int main(int argc, char* argv[]) {
             static_cast<double>(successful_reads) / successful_writes : 0.0;
     std::cout << "Read/Write Ratio:  " << ratio << std::endl;
     
-    print_latency_stats("Read", read_latencies);
-    print_latency_stats("Write", write_latencies);
     if (inject_delays) {
-        print_latency_stats("Delay", delay_latencies);
+        std::cout << "Injected Delays (ms): " << delay_ns / 1e6 << std::endl;
+        print_latency_stats("Read", delayed_read_latencies);
     }
+    else print_latency_stats("Read", read_latencies);
+    print_latency_stats("Write", write_latencies);
 
     // --- CLEANUP ---
     std::cout << "\nCleaning up benchmark key..." << std::endl;
