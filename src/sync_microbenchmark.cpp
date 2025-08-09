@@ -526,10 +526,10 @@ int main(int argc, char* argv[]) {
         //  2. Delay proportional to value size
         //  3. Linear factor between 8KB - 16KB to handle change in memcpy() instrumentation
         //      - Does not kick in under 8KB, does not increase after 16KB
-        const double const_offset = 4000; // constant delay offset for all sizes
+        const double const_offset = 5000; // constant delay offset for all sizes
         const double offset_8KB = 100000; // extra delay when reaching 8KB
         const double offset_16KB = 80000; // extra delay per byte between 8KB and 16KB
-        const double coef = 0.5; // ns of delay per byte, only apply this before 8KB
+        const double coef = 0.25; // ns of delay per byte, only apply this before 8KB
 
         // Calculate delay based on value size
         delay_ns = const_offset;
