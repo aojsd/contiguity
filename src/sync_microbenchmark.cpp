@@ -218,7 +218,7 @@ void process_incoming_reads(int sock_fd, std::string& receive_buffer, std::queue
                     double final_delay_ns = delay_ns;
 
                     // If a command-line scaling factor is provided, apply it AND the system dilation factor.
-                    if (scaling_factor > 0.0) {
+                    if (scaling_factor > 0.0 && value_size >= 8192) {
                         double system_dilation = read_dilation_factor();
                         final_delay_ns *= system_dilation * scaling_factor;
                     }
