@@ -46,12 +46,8 @@ run_and_capture_pid() {
             app_cmd="${pr_root}/pr -f ${pr_root}/benchmark/graphs/twitter.sg -n 1"
             ;;
         *memcached*)
-            # IP="127.0.0.1"
-            # ARGS="-p 11211 -l ${IP} -m 16384 -u michael"
-            # app_cmd="/home/michael/software/memcached/memcached ${ARGS}"
-            # Use UNIX domain socket for memcached
-            SOCKET="/home/michael/ISCA_2025_results/tmp/sync_microbench.sock"
-            ARGS="-s ${SOCKET} -u michael -a 0777"
+            IP="127.0.0.1"
+            ARGS="-p 11211 -l ${IP} -m 16384 -u michael"
             app_cmd="/home/michael/software/memcached/memcached ${ARGS}"
             ;;
         *sync_microbench*)
