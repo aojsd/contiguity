@@ -39,6 +39,8 @@ usage() {
         echo "  --NO_COMPACT          Disable memory compaction."
         echo "  --ZERO_COMPACT        Set compaction proactiveness to 0."
         echo "  --DIST                Collect memory access distribution."
+        echo "  --SYNC                Enable synchronization profiling."
+        echo "  --FWORK               Track calls to this function as units of work."
         echo "  --RANDOM_FREELIST     Use random free list."
         echo "  --LOOP_SLEEP <sec>    Sleep time for loop.sh (default: 5)."
         echo "  --PIN \"<args>\"        Pass extra arguments to the Pin tool."
@@ -61,7 +63,8 @@ NO_REBOOT=0
 NO_COMPACT=0
 ZERO_COMPACT=0
 DIST=0
-SYNC_PROF=1
+SYNC_PROF=0
+FWORK=0
 TRACK_PIN=0
 RANDOM_FREELIST=0
 
@@ -75,6 +78,7 @@ parse_trial_args() {
             --ZERO_COMPACT)     ZERO_COMPACT=1; shift ;;
             --DIST)             DIST=1; shift ;;
             --SYNC|--SYNC_PROF) SYNC_PROF="$2"; shift 2 ;;
+            --FWORK)            FWORK="$2"; shift 2 ;;
             --TRACK_PIN)        TRACK_PIN=1; shift ;;
             --RANDOM_FREELIST)  RANDOM_FREELIST=1; shift ;;
             --THP)              THP="$2"; shift 2 ;;
@@ -132,6 +136,7 @@ parse_config_file() {
             "Track Pin Memory Contiguity")      [[ "$val" == "Yes" ]] && TRACK_PIN=1 ;;
             "Collect Access Distribution")      [[ "$val" == "Yes" ]] && DIST=1 ;;
             "Synchronization Profiling")        [[ "$val" == "Yes" ]] && SYNC_PROF=1 ;;
+            "Function Units of Work")           FWORK="$val" ;;
             "Extra Pin Arguments")              PIN_EXTRA="${val//\"/}" ;; # Remove quotes
             "Loop Script Sleep (sec)")          LOOP_SLEEP=$val ;;
         esac

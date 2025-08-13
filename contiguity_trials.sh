@@ -46,8 +46,12 @@ run_and_capture_pid() {
             app_cmd="${pr_root}/pr -f ${pr_root}/benchmark/graphs/twitter.sg -n 1"
             ;;
         *memcached*)
-            IP="127.0.0.1"
-            ARGS="-p 11211 -l ${IP} -m 16384 -u michael"
+            # IP="127.0.0.1"
+            # ARGS="-p 11211 -l ${IP} -m 16384 -u michael"
+            # app_cmd="/home/michael/software/memcached/memcached ${ARGS}"
+            # Use UNIX domain socket for memcached
+            SOCKET="/home/michael/ISCA_2025_results/tmp/sync_microbench.sock"
+            ARGS="-s ${SOCKET} -u michael -a 0777"
             app_cmd="/home/michael/software/memcached/memcached ${ARGS}"
             ;;
         *sync_microbench*)
@@ -225,7 +229,7 @@ prepare_remote_system() {
         fi
         local c_dir="/home/michael/software/PiTracer/source/tools/PiTracer/consumer"
         ssh "${remote_host}" \
-            "${c_dir}/consumer ${OUTP_DIR} ${CONSUMER_ZSTD} -s 10 -p 100000 ${ARGS}" \
+            "${c_dir}/consumer ${OUTP_DIR} ${CONSUMER_ZSTD} -s 5 -p 100000 ${ARGS}" \
             "2> /home/michael/ISCA_2025_results/tmp/consumer.log" &
     fi
 }
@@ -317,6 +321,9 @@ fi
 if [ "$SYNC_PROF" == "1" ]; then
     PIN_EXTRA+=" -prof_sync 1"
 fi
+if [ "$FWORK" != "0" ]; then
+    PIN_EXTRA+=" -fcalls ${FWORK}"
+fi
 
 case "$PIN_MODE" in
     native)
@@ -336,16 +343,16 @@ case "$PIN_MODE" in
         PIN_ARGS="-stage1 0 -bpages 16 -index_limit 20000 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
         ;;
     disk-nocache)
-        PIN_ARGS="-comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="-buf_type 0 -comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
         NOCACHE=1
         ;;
     tidial)
-        PIN_ARGS="-comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="-buf_type 0 -comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
         NOCACHE=1
         CONSUMER_DYNAMIC=1
         ;;
     tidial-balanced)
-        PIN_ARGS="-comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        PIN_ARGS="-buf_type 0 -comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
         NOCACHE=1
         CONSUMER_DYNAMIC=1
         CONSUMER_BALANCING=1
@@ -447,10 +454,15 @@ for i in $(seq 1 "$NUM_TRIALS"); do
         #     SYNC_ARGS+=" --inject_delays"
         # fi
 
+        # # Add scaling factor for tidial*
+        # if [[ "$PIN_MODE" == tidial* ]]; then
+        #   SYNC_ARGS+=" --dilation_scaling 1.0"
+        # fi
+
         # Run the sync microbenchmark
-        sleep 5
+        sleep 3
         ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./sync_microbench ${SYNC_ARGS} | tee /home/michael/ISCA_2025_results/tmp/sync_data.out"
-        sleep 5
+        sleep 3
     
     else
         # --- Generic Application Path ---

@@ -13,16 +13,16 @@
 #include <unordered_set> // Include for the hash set
 
 // Networking includes
-#include <arpa/inet.h>
-#include <netdb.h>
 #include <sys/socket.h>
+#include <sys/un.h> // Required for UNIX domain sockets
 #include <unistd.h>
 #include <sys/epoll.h>
 #include <fcntl.h>
 
 // --- Configuration ---
-const char* HOST = "127.0.0.1";
-const int PORT = 11211;
+// const char* HOST = "127.0.0.1"; // No longer needed
+// const int PORT = 11211;         // No longer needed
+const char* SOCKET_PATH = "/home/michael/ISCA_2025_results/tmp/sync_microbench.sock"; // Path to the UNIX domain socket
 const int MAX_TOTAL_IN_FLIGHT = 1024; // Max requests across ALL connections
 const int BUFFER_SIZE = 16384; 
 const int DEFAULT_CONNECTIONS = 4;
@@ -234,15 +234,21 @@ int main(int argc, char* argv[]) {
     int epoll_fd = epoll_create1(0);
     if (epoll_fd == -1) { perror("epoll_create1"); return 1; }
 
+    // *** MODIFIED: Connect to UNIX domain socket ***
     for (int i = 0; i < num_connections; ++i) {
-        int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+        int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0); // Use AF_UNIX for domain sockets
         if (sock_fd < 0) { perror("socket"); return 1; }
-        struct sockaddr_in serv_addr;
+        
+        struct sockaddr_un serv_addr; // Use the specific address structure for UNIX sockets
         memset(&serv_addr, 0, sizeof(serv_addr));
-        serv_addr.sin_family = AF_INET;
-        serv_addr.sin_port = htons(PORT);
-        inet_pton(AF_INET, HOST, &serv_addr.sin_addr);
-        if (connect(sock_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) { perror("connect"); return 1; }
+        serv_addr.sun_family = AF_UNIX;
+        strncpy(serv_addr.sun_path, SOCKET_PATH, sizeof(serv_addr.sun_path) - 1);
+
+        if (connect(sock_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) { 
+            perror("connect"); 
+            return 1; 
+        }
+        
         make_socket_non_blocking(sock_fd);
         connections[i].fd = sock_fd;
         struct epoll_event event;
@@ -250,7 +256,7 @@ int main(int argc, char* argv[]) {
         event.data.ptr = &connections[i];
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sock_fd, &event) == -1) { perror("epoll_ctl_add"); return 1; }
     }
-    std::cout << "Established " << num_connections << " connections to " << HOST << ":" << PORT << std::endl;
+    std::cout << "Established " << num_connections << " connections to " << SOCKET_PATH << std::endl;
 
     std::map<std::string, Stats> statistics;
     std::map<std::string, long long> response_counts;
