@@ -31,7 +31,7 @@ mkdir -p ${TMP_DIR}/ptables
 while ps -p $pid > /dev/null; do
     PTIME=$(ps -p $pid -o etime=)
     TIME=$(python3 $DIR/src/python/parse_time.py $PTIME)
-    CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/dump_pagemap $pid ${TMP_DIR}/ptables/pagemap $max_regions)
+    CONTIG=$(sudo pmap -x $pid | sudo nice -n -20 $DIR/bin/dump_pagemap $pid ${TMP_DIR}/ptables/pagemap $max_regions)
     RET=$?
 
     # Check that CONTIG is not just whitespace or empty

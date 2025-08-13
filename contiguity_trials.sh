@@ -415,10 +415,10 @@ for i in $(seq 1 "$NUM_TRIALS"); do
 
         # Create a cgroup to rate-limit the request generator to 10% CPU
         RQ_FILE="/home/michael/software/YCSB/workloads/workload_traces/${APP_NAME}.dat"
-        RQ_PROG="/home/michael/ISCA_2025_results/contiguity/memcached_requests"
+        RQ_PROG="/home/michael/ISCA_2025_results/contiguity/bin/memcached_requests"
 
         # Let memcached server come up
-        sleep 5
+        sleep 3
         if [ "$CPU_LIMIT" != "0" ]; then
             ssh "${REMOTE_HOST}" "echo '${MAX_CPU} 100000' | sudo tee /sys/fs/cgroup/pin/cpu.max"
         fi
@@ -457,7 +457,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
 
         # Run the sync microbenchmark
         sleep 3
-        ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./sync_microbench ${SYNC_ARGS} | tee /home/michael/ISCA_2025_results/tmp/sync_data.out"
+        ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./bin/sync_microbench ${SYNC_ARGS} | tee /home/michael/ISCA_2025_results/tmp/sync_data.out"
         sleep 3
     
     else

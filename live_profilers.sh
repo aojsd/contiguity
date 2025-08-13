@@ -24,5 +24,5 @@ sudo ${CONT_DIR}/kernel_work/kthread_cputime.bt > ${TMP_DIR}/${process_name}.kth
 sudo ${CONT_DIR}/kernel_work/pid_syscall_profiler.bt ${pid} > ${TMP_DIR}/${process_name}.syscalls &
 
 # Attach perf to the whole process
-EVENTS="instructions,L1-dcache-loads,L1-dcache-stores,L1-dcache-load-misses,rob_misc_events.pause_inst"
+EVENTS="instructions,L1-dcache-loads,L1-dcache-stores,rob_misc_events.pause_inst"
 sudo perf stat -e ${EVENTS} -p ${pid} -a &> ${TMP_DIR}/${process_name}.perf &
