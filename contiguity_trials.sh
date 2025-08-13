@@ -407,7 +407,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
 
     # Monitor contiguity and live profilers
     ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./loop.sh ${APP_PID} ${NAME} ${REGIONS} > /home/michael/ISCA_2025_results/tmp/${PIN_MODE}.txt" &
-    ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./live_profilers.sh ${APP_PID} ${NAME}" &
+    ssh "${REMOTE_HOST}" "cd ${CONTIGUITY}; ./live_profilers.sh ${APP_PID} ${NAME} ${PIN_MODE}" &
     if [[ $APP_NAME == mem* ]]; then
         # --- Memcached Path ---
         # Start tracking packet activity

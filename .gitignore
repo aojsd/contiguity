@@ -2,6 +2,7 @@ results/
 local_scripts/
 .vscode/
 bin/
+src/test_programs
 check_contiguity
 src/test
 tmp*
