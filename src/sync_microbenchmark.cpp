@@ -271,32 +271,45 @@ void reader_task(size_t buffer_size, size_t value_size, long long ops_target, bo
 
         std::queue<InFlightMarker> in_flight_queue;
         std::string receive_buffer;
+        std::string send_buffer; // Buffer for unsent data
         long long reads_sent = 0;
+        bool has_data_to_send = false;
 
-        while (reads_sent < ops_target && !stop_flag) {
-            // Try to send requests if we have capacity
-            while (in_flight_queue.size() < buffer_size && reads_sent < ops_target && !stop_flag) {
-                std::string get_command = "get " + BENCHMARK_KEY + "\r\n";
+        while ((reads_sent < ops_target || !in_flight_queue.empty()) && !stop_flag) {
+            if (in_flight_queue.size() < buffer_size && reads_sent < ops_target && send_buffer.empty()) {
+                send_buffer = "get " + BENCHMARK_KEY + "\r\n";
                 auto send_time = std::chrono::high_resolution_clock::now();
-                send_all(sock_fd, get_command);
                 in_flight_queue.push({send_time});
                 reads_sent++;
+                has_data_to_send = true;
             }
 
-            // Check for and process incoming responses
-            struct epoll_event events[1];
-            int n_events = epoll_wait(epoll_fd, events, 1, 0); // 0 timeout for non-blocking check
-            if (n_events > 0) {
-                process_incoming_reads(sock_fd, receive_buffer, in_flight_queue, value_size, inject_delays, scaling_factor);
+            if (has_data_to_send) {
+                event.events = EPOLLIN | EPOLLOUT | EPOLLET;
+                epoll_ctl(epoll_fd, EPOLL_CTL_MOD, sock_fd, &event);
             }
-        }
-        
-        // After sending all requests, drain the remaining responses
-        while (!in_flight_queue.empty() && !stop_flag) {
+
             struct epoll_event events[1];
-            int n_events = epoll_wait(epoll_fd, events, 1, 100); // 100ms timeout
+            int n_events = epoll_wait(epoll_fd, events, 1, 100); 
+
             if (n_events > 0) {
-                process_incoming_reads(sock_fd, receive_buffer, in_flight_queue, value_size, inject_delays, scaling_factor);
+                if (events[0].events & EPOLLOUT) {
+                    ssize_t sent_now = send(sock_fd, send_buffer.c_str(), send_buffer.length(), 0);
+                    if (sent_now > 0) {
+                        send_buffer.erase(0, sent_now);
+                    } else if (sent_now < 0 && (errno != EAGAIN && errno != EWOULDBLOCK)) {
+                         throw std::runtime_error(std::string("send() failed: ") + strerror(errno));
+                    }
+
+                    if (send_buffer.empty()) {
+                        has_data_to_send = false;
+                        event.events = EPOLLIN | EPOLLET;
+                        epoll_ctl(epoll_fd, EPOLL_CTL_MOD, sock_fd, &event);
+                    }
+                }
+                if (events[0].events & EPOLLIN) {
+                    process_incoming_reads(sock_fd, receive_buffer, in_flight_queue, value_size, inject_delays, scaling_factor);
+                }
             }
         }
 
@@ -352,6 +365,7 @@ void writer_task(size_t buffer_size, size_t value_size, long long ops_target) {
         if (epoll_fd == -1) throw std::runtime_error(std::string("writer epoll_create1: ") + strerror(errno));
 
         struct epoll_event event;
+        // Start by only listening for readable events
         event.events = EPOLLIN | EPOLLET;
         event.data.fd = sock_fd;
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sock_fd, &event) == -1) {
@@ -361,31 +375,53 @@ void writer_task(size_t buffer_size, size_t value_size, long long ops_target) {
 
         std::queue<InFlightMarker> in_flight_queue;
         std::string receive_buffer;
+        std::string send_buffer; // Buffer for unsent data
         std::string update_value(value_size, 'A');
         long long writes_sent = 0;
+        bool has_data_to_send = false; // Tracks if we need to write
 
-        while (writes_sent < ops_target && !stop_flag) {
-            while (in_flight_queue.size() < buffer_size && writes_sent < ops_target && !stop_flag) {
+        while ((writes_sent < ops_target || !in_flight_queue.empty()) && !stop_flag) {
+            // Try to generate a new request if we have capacity and no pending send
+            if (in_flight_queue.size() < buffer_size && writes_sent < ops_target && send_buffer.empty()) {
                 update_value[0]++;
                 std::string replace_command = "replace " + BENCHMARK_KEY + " 0 0 " + std::to_string(update_value.length()) + "\r\n" + update_value + "\r\n";
+                send_buffer = replace_command;
+                
                 auto send_time = std::chrono::high_resolution_clock::now();
-                send_all(sock_fd, replace_command);
                 in_flight_queue.push({send_time});
                 writes_sent++;
+                has_data_to_send = true;
+            }
+            
+            // If we have data to send, we need to monitor for EPOLLOUT
+            if (has_data_to_send) {
+                event.events = EPOLLIN | EPOLLOUT | EPOLLET;
+                epoll_ctl(epoll_fd, EPOLL_CTL_MOD, sock_fd, &event);
             }
 
             struct epoll_event events[1];
-            int n_events = epoll_wait(epoll_fd, events, 1, 0);
-            if (n_events > 0) {
-                process_incoming_writes(sock_fd, receive_buffer, in_flight_queue);
-            }
-        }
-
-        while (!in_flight_queue.empty() && !stop_flag) {
-            struct epoll_event events[1];
+            // Use a timeout to avoid busy-waiting
             int n_events = epoll_wait(epoll_fd, events, 1, 100);
+
             if (n_events > 0) {
-                process_incoming_writes(sock_fd, receive_buffer, in_flight_queue);
+                if (events[0].events & EPOLLOUT) {
+                    ssize_t sent_now = send(sock_fd, send_buffer.c_str(), send_buffer.length(), 0);
+                    if (sent_now > 0) {
+                        send_buffer.erase(0, sent_now);
+                    } else if (sent_now < 0 && (errno != EAGAIN && errno != EWOULDBLOCK)) {
+                        throw std::runtime_error(std::string("send() failed: ") + strerror(errno));
+                    }
+                    
+                    // If all data is sent, stop monitoring for EPOLLOUT
+                    if (send_buffer.empty()) {
+                        has_data_to_send = false;
+                        event.events = EPOLLIN | EPOLLET;
+                        epoll_ctl(epoll_fd, EPOLL_CTL_MOD, sock_fd, &event);
+                    }
+                }
+                if (events[0].events & EPOLLIN) {
+                    process_incoming_writes(sock_fd, receive_buffer, in_flight_queue);
+                }
             }
         }
 
@@ -535,12 +571,16 @@ int main(int argc, char* argv[]) {
         delay_ns = const_offset;
         if (value_size_bytes < 8192) {
             delay_ns += coef * value_size_bytes;
+            delay_ns *= 9;
         }
-        if (value_size_bytes >= 8192) {
-            delay_ns += offset_8KB;
-        }
-        if (value_size_bytes >= 16384) {
-            delay_ns += offset_16KB;
+        else {
+            if (value_size_bytes >= 8192) {
+                delay_ns += offset_8KB;
+            }
+            if (value_size_bytes >= 16384) {
+                delay_ns += offset_16KB;
+            }
+            delay_ns *= 3;
         }
         double delay_ms = delay_ns / 1e6; // Convert to milliseconds
         std::cout << "Artificial reader delays are ENABLED: " << delay_ms << " ms per read." << std::endl;
@@ -589,8 +629,8 @@ int main(int argc, char* argv[]) {
     auto start_time = std::chrono::high_resolution_clock::now();
 
     // Pass the new scaling factor to the reader thread
-    std::thread reader_thread(reader_task, buffer_size, value_size_bytes, ops_target, inject_delays, dilation_scaling_factor);
     std::thread writer_thread(writer_task, buffer_size, value_size_bytes, ops_target);
+    std::thread reader_thread(reader_task, buffer_size, value_size_bytes, ops_target, inject_delays, dilation_scaling_factor);
 
     reader_thread.join();
     writer_thread.join();
