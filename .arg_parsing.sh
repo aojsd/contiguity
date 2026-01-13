@@ -28,6 +28,7 @@ usage() {
 
         # Print all the common options
         echo "  --NO_REBOOT           Do not reboot the machine between trials."
+        echo "  --HYPERTHREADING      Enable CPU hyperthreading."
         echo "  --TRACK_PIN           Track contiguity of memory allocated by Pin."
         echo "  --THP <0|1>           Enable/disable Transparent Huge Pages (default: 1)."
         echo "  --THP_SCAN <num>      Set pages_to_scan for khugepaged (default: 4096)."
@@ -53,6 +54,7 @@ usage() {
 THP=1
 THP_SCAN=4096
 THP_SLEEP=10000
+HYPERTHREADING=0
 DIRTY=0
 CPU_LIMIT=0
 TIME_DILATION=0
@@ -75,6 +77,7 @@ parse_trial_args() {
         case "$1" in
             --NO_REBOOT)        NO_REBOOT=1; shift ;;
             --NO_COMPACT)       NO_COMPACT=1; shift ;;
+            --HYPERTHREADING)   HYPERTHREADING=1; shift ;;
             --ZERO_COMPACT)     ZERO_COMPACT=1; shift ;;
             --DIST)             DIST=1; shift ;;
             --SYNC|--SYNC_PROF) SYNC_PROF="$2"; shift 2 ;;
@@ -123,6 +126,7 @@ parse_config_file() {
         # Assign value to the correct script variable
         case "$key" in
             "Reboot Between Trials")            [[ "$val" == "Disabled" ]] && NO_REBOOT=1 ;;
+            "Hyperthreading")                   HYPERTHREADING=1 ;;
             "Transparent Huge Pages (THP)")     [[ "$val" == "Enabled" ]] && THP=1 || THP=0 ;;
             "THP Pages to Scan")                THP_SCAN=$val ;;
             "THP Scan Sleep (ms)")              THP_SLEEP=$val ;;

@@ -85,6 +85,7 @@ run_and_capture_pid() {
 
     # This command correctly handles the 'tee' pipeline and the 'time' fork.
     local remote_command="
+        export OMP_NUM_THREADS=${threads};
         # Start the command in a backgrounded subshell.
         { ${final_cmd_to_run}; } > \"${remote_log_file}\" 2>&1 &
 
@@ -182,6 +183,11 @@ prepare_remote_system() {
     if [ "$CPU_LIMIT" != "0" ]; then
         MAX_CPU=$((CPU_LIMIT * 1000))
     fi
+    if [ "$HYPERTHREADING" == "1" ]; then
+        post_reboot_cmds+="sudo sh -c 'echo on > /sys/devices/system/cpu/smt/control'; "
+    else
+        post_reboot_cmds+="sudo sh -c 'echo off > /sys/devices/system/cpu/smt/control'; "
+    fi
     post_reboot_cmds+="sudo mkdir -p /sys/fs/cgroup/pin; "
     post_reboot_cmds+="sudo chmod o+w /sys/fs/cgroup/cgroup.procs /sys/fs/cgroup/pin/cgroup.procs; "
 
@@ -189,7 +195,6 @@ prepare_remote_system() {
     post_reboot_cmds+="sudo sh -c 'echo 0 > /proc/sys/kernel/nmi_watchdog'; "
     post_reboot_cmds+="sudo sh -c 'echo 0 > /proc/sys/vm/swappiness'; "
     post_reboot_cmds+="sudo swapoff -a; "
-    post_reboot_cmds+="sudo sh -c 'echo off > /sys/devices/system/cpu/smt/control'; "
     post_reboot_cmds+="sudo chown michael /dev/hugepages; "
     post_reboot_cmds+="sudo sh -c 'echo 1024 > /proc/sys/vm/nr_hugepages'; "
     post_reboot_cmds+="echo 0 | sudo tee /proc/sys/kernel/randomize_va_space > /dev/null; "
@@ -204,6 +209,9 @@ prepare_remote_system() {
 
     # Drop caches right before the run
     post_reboot_cmds+="sudo /home/michael/ssd/drop_cache.sh > /dev/null;"
+
+    # Enable all perf profiling to non-root users
+    post_reboot_cmds+="sudo sh -c 'echo -1 > /proc/sys/kernel/perf_event_paranoid'; "
 
     # Execute the entire command string in one go
     # post_reboot_cmds+="set +x;"
@@ -222,6 +230,9 @@ prepare_remote_system() {
         if [ "$CONSUMER_BALANCING" == "1" ]; then
             # CONTROL_BALANCING="--balance"
             ARGS+=" --balance"
+        fi
+        if [ "$CONSUMER_ZSTD" == "1" ]; then
+            echo "Using zstd compression for consumer."
         fi
         local c_dir="/home/michael/software/PiTracer/source/tools/PiTracer/consumer"
         ssh "${remote_host}" \
@@ -328,10 +339,6 @@ case "$PIN_MODE" in
     empty)
         PIN_ARGS="-stage1 0 -bpages 16 ${PIN_EXTRA} ${DIST_FILE}"
         ;;
-    bblock)
-        PIN_ARGS="-o /home/michael/ISCA_2025_results/tmp/${NAME}.bblocks"
-        BBLOCK_ONLY=1
-        ;;
     empty-sleep)
         PIN_ARGS="-stage1 0 -bpages 16 -iosleep 1 ${PIN_EXTRA} ${DIST_FILE}"
         ;;
@@ -341,6 +348,9 @@ case "$PIN_MODE" in
     disk-nocache)
         PIN_ARGS="-buf_type 0 -comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
         NOCACHE=1
+        ;;
+    zstd)
+        PIN_ARGS="-stage1 12 -comp1 3 -bpages 16 -index_limit 20000 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
         ;;
     tidial)
         PIN_ARGS="-buf_type 0 -comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
@@ -353,21 +363,11 @@ case "$PIN_MODE" in
         CONSUMER_DYNAMIC=1
         CONSUMER_BALANCING=1
         ;;
-    disk-largebuf)
-        PIN_ARGS="-stage1 0 -outprefix ${OUTPREFIX} -index_limit 200 ${PIN_EXTRA} ${DIST_FILE}"
-        ;;
-    struct)
-        PIN_ARGS="-buf_type 0 -stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
-        ;;
-    fields|fields-sync)
-        PIN_ARGS="-stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
-        ;;
-    fields-sync)
-        PIN_ARGS="-fsync 1 -stage1 0 -comp1 3 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
-        ;;
-    pitracer)
-        PIN_ARGS="-comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+    tidial-zstd)
+        PIN_ARGS="-buf_type 0 -comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
         NOCACHE=1
+        # CONSUMER_DYNAMIC=1
+        # CONSUMER_BALANCING=1
         CONSUMER_ZSTD=1
         ;;
     *)
@@ -380,7 +380,9 @@ esac
 # Run Trials
 # ==========================================================================================================
 for i in $(seq 1 "$NUM_TRIALS"); do
-    echo "========================= Trial $i of ${NUM_TRIALS}: ${APP_NAME} (${PIN_MODE}) ========================="
+    # Get current time
+    TIME=$(date +"%-I:%M:%S %p")
+    echo "========================= ${TIME} - Trial $i of ${NUM_TRIALS}: ${APP_NAME} (${PIN_MODE}) ========================="
 
     # 1. PREPARE the remote system
     prepare_remote_system "$REMOTE_HOST" "$i"
@@ -437,23 +439,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
             # Extract the captured number from the BASH_REMATCH array
             ITEM_SIZE="${BASH_REMATCH[1]}"
         fi
-
-        # Specific large microbenchmark
-        if [[ $APP_NAME == sync_microbench_large* ]]; then
-            ITEM_SIZE=32
-            N_REQ=100000
-        fi
         SYNC_ARGS="--item_size ${ITEM_SIZE} --requests ${N_REQ}"
-
-        # Add --inject_delays argument if the pin mode is not 'native'
-        # if [ "$PIN_MODE" != "native" ]; then
-        #     SYNC_ARGS+=" --inject_delays"
-        # fi
-
-        # # Add scaling factor for tidial*
-        # if [[ "$PIN_MODE" == tidial* ]]; then
-        #   SYNC_ARGS+=" --dilation_scaling 1.0"
-        # fi
 
         # Run the sync microbenchmark
         sleep 3
