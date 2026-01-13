@@ -1,0 +1,62 @@
+#!/usr/bin/env bpftrace
+/*
+ * profiler.bt
+ *
+ * This version uses the user-validated workaround of assigning bswap()
+ * to a variable before filtering to generate a final histogram.
+ */
+
+#include <net/ip.h>
+#include <net/tcp.h>
+
+// === Incoming Requests (Packet-level, via IP Layer) ===
+
+kprobe:ip_local_deliver
+{
+	$skb = (struct sk_buff *)ctx->di;
+	$iph = (struct iphdr *)($skb->head + $skb->network_header);
+
+	if ($iph->protocol == IPPROTO_TCP) {
+		$tcph = (struct tcphdr *)($skb->head + $skb->transport_header);
+		// The critical workaround: store the byte-swapped value first.
+		$dport = bswap($tcph->dest);
+
+		// Now, filter on the intermediate variable.
+		if ($dport == 11211) {
+			$last_in = @ts_in;
+			@ts_in = nsecs;
+
+			if ($last_in > 0) {
+				// Populate the histogram instead of printing.
+				@ns_delta_IN_packet = hist(nsecs - $last_in);
+			}
+		}
+	}
+}
+
+// === Outgoing Responses (Message-level, via Port Filter) ===
+
+kprobe:tcp_sendmsg
+{
+	$sk = (struct sock *)ctx->di;
+	$sport = $sk->__sk_common.skc_num;
+
+	if ($sport == 11211)
+	{
+		$last_out = @ts_out;
+		@ts_out = nsecs;
+
+		if ($last_out > 0) {
+			// Populate the histogram instead of printing.
+			@ns_delta_OUT_msg = hist(nsecs - $last_out);
+		}
+	}
+}
+
+// === Cleanup on Exit ===
+
+END
+{
+	clear(@ts_in);
+	clear(@ts_out);
+}

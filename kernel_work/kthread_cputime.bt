@@ -1,0 +1,35 @@
+#!/usr/bin/env bpftrace
+
+#define PF_KTHREAD 2097152
+
+BEGIN
+{
+    // Print the CSV header once at the start.
+    // printf("thread_name,duration_ns\n");
+}
+
+kretprobe:schedule
+/ (curtask->flags & PF_KTHREAD) /
+{
+    @start[curtask->pid] = nsecs;
+}
+
+tracepoint:sched:sched_switch
+/@start[args->prev_pid]/
+{
+    $duration_ns = nsecs - @start[args->prev_pid];
+    // printf("%s,%llu\n", args->prev_comm, $duration_ns);
+
+    // Build histogram of time slice durations
+    @invocations[args->prev_comm] = hist($duration_ns);
+
+    // Sum total runtime for each thread
+    @total_runtime[args->prev_comm] = sum($duration_ns);
+
+    delete(@start[args->prev_pid]);
+}
+
+END
+{
+    clear(@start);
+}
