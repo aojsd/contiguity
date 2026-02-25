@@ -1,0 +1,61 @@
+#!/usr/bin/env bpftrace
+/*
+ * page_alloc_trace.bt
+ *
+ * Traces all physical page allocations and frees system-wide via the
+ * buddy allocator. No PID filter -- captures ALL allocations including
+ * kernel page cache activity induced by Pin's disk I/O.
+ *
+ * Usage: sudo ./page_alloc_trace.bt
+ * Terminate with SIGINT (Ctrl-C or pkill -2).
+ *
+ * Tracepoints (stable ABI, verified on 6.13.8 and 6.16.7):
+ *   kmem:mm_page_alloc       - pfn, order, gfp_flags, migratetype
+ *   kmem:mm_page_free         - pfn, order
+ *   kmem:mm_page_alloc_extfrag - pfn, alloc_order, fallback_order,
+ *                                alloc_migratetype, fallback_migratetype,
+ *                                change_ownership
+ */
+
+tracepoint:kmem:mm_page_alloc
+{
+	// Allocation order histogram (all processes)
+	@alloc_order = hist(args->order);
+
+	// Total pages allocated: each allocation is 2^order pages
+	@alloc_pages = sum((uint64)(1 << args->order));
+
+	// Total allocation count
+	@alloc_count = count();
+
+	// Breakdown by migratetype
+	// 0=UNMOVABLE, 1=MOVABLE, 2=RECLAIMABLE, 3=HIGHATOMIC, 4=CMA, 5=ISOLATE
+	@alloc_by_migtype[args->migratetype] = count();
+	@pages_by_migtype[args->migratetype] = sum((uint64)(1 << args->order));
+
+	// Breakdown by process name
+	@alloc_by_comm[comm] = count();
+	@pages_by_comm[comm] = sum((uint64)(1 << args->order));
+
+	// Per-process allocation order histograms
+	@order_by_comm[comm] = hist(args->order);
+}
+
+tracepoint:kmem:mm_page_free
+{
+	@free_order = hist(args->order);
+	@free_pages = sum((uint64)(1 << args->order));
+	@free_count = count();
+	@free_by_comm[comm] = count();
+	@free_pages_by_comm[comm] = sum((uint64)(1 << args->order));
+}
+
+tracepoint:kmem:mm_page_alloc_extfrag
+{
+	// External fragmentation: allocator fell back to a different migratetype
+	@extfrag_count = count();
+	@extfrag_alloc_order = hist(args->alloc_order);
+	@extfrag_fallback_order = hist(args->fallback_order);
+	@extfrag_types[args->alloc_migratetype, args->fallback_migratetype] = count();
+	@extfrag_ownership_change = sum(args->change_ownership);
+}

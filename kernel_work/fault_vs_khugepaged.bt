@@ -1,0 +1,107 @@
+#!/usr/bin/env bpftrace
+/*
+ * fault_vs_khugepaged.bt
+ *
+ * For a target PID ($1), counts page faults between successive
+ * khugepaged collapse/scan events. Measures the "race" between
+ * the application allocating 4K pages and khugepaged promoting
+ * them to 2M THPs.
+ *
+ * Captures the target process's mm_struct via curtask->mm on first
+ * fault, then uses it to filter collapse/scan events to our process.
+ *
+ * Usage: sudo ./fault_vs_khugepaged.bt <target_pid>
+ * Terminate with SIGINT (Ctrl-C or pkill -2).
+ *
+ * Tracepoints (stable ABI, verified on 6.13.8 and 6.16.7):
+ *   exceptions:page_fault_user       - address, ip, error_code
+ *   huge_memory:mm_collapse_huge_page - mm, isolated, status
+ *   huge_memory:mm_khugepaged_scan_pmd - mm, pfn, writable, referenced,
+ *                                        none_or_zero, status, unmapped
+ */
+
+tracepoint:exceptions:page_fault_user
+/pid == $1/
+{
+	// Capture target process mm_struct on first fault
+	if (@_target_mm == 0) {
+		@_target_mm = (uint64)curtask->mm;
+	}
+
+	// Increment running fault counters (manual integers, not count())
+	@_fc_target++;
+	@_fc_any++;
+	@_fc_scan++;
+
+	// Overall totals
+	@total_faults = count();
+}
+
+tracepoint:huge_memory:mm_collapse_huge_page
+{
+	// Track all collapses regardless of process
+	@total_collapses = count();
+
+	// Success (SCAN_SUCCEED=1) vs failure
+	@collapse_status[args->status] = count();
+
+	// Histogram: faults between ANY collapse
+	if (@_fc_any > 0) {
+		@hist_faults_per_any_collapse = hist(@_fc_any);
+	}
+	@_fc_any = 0;
+
+	// Time between successive collapses
+	if (@_last_collapse_ns > 0) {
+		$delta = nsecs - @_last_collapse_ns;
+		@collapse_interval_ns = hist($delta);
+	}
+	@_last_collapse_ns = nsecs;
+
+	// Filter to target process mm_struct
+	if (@_target_mm != 0 && (uint64)args->mm == @_target_mm) {
+		@target_collapses = count();
+		@target_collapse_status[args->status] = count();
+
+		if (@_fc_target > 0) {
+			@hist_faults_per_target_collapse = hist(@_fc_target);
+		}
+		@_fc_target = 0;
+
+		if (@_last_target_collapse_ns > 0) {
+			$tdelta = nsecs - @_last_target_collapse_ns;
+			@target_collapse_interval_ns = hist($tdelta);
+		}
+		@_last_target_collapse_ns = nsecs;
+	}
+}
+
+tracepoint:huge_memory:mm_khugepaged_scan_pmd
+{
+	// Track all scans (most do NOT result in a collapse)
+	@total_scans = count();
+	@scan_status[args->status] = count();
+
+	// Histogram of faults between any scan
+	if (@_fc_scan > 0) {
+		@hist_faults_per_scan = hist(@_fc_scan);
+	}
+	@_fc_scan = 0;
+
+	// Filter to target process mm
+	if (@_target_mm != 0 && (uint64)args->mm == @_target_mm) {
+		@target_scans = count();
+		@target_scan_status[args->status] = count();
+	}
+}
+
+END
+{
+	// Clean up scratch maps (underscore-prefixed)
+	clear(@_fc_target);
+	clear(@_fc_any);
+	clear(@_fc_scan);
+	clear(@_last_collapse_ns);
+	clear(@_last_target_collapse_ns);
+	clear(@_target_mm);
+}
