@@ -223,6 +223,9 @@ prepare_remote_system() {
     
     if [ "$NOCACHE" == "1" ]; then
         ARGS=""
+        if [ -n "$CONSUMER_ABLATION" ]; then
+            ARGS+=" --ablation ${CONSUMER_ABLATION}"
+        fi
         if [ "$CONSUMER_DYNAMIC" == "1" ]; then
             # CONTROL_DYNAMIC="--dynamic"
             ARGS+=" --dynamic"
@@ -370,6 +373,34 @@ case "$PIN_MODE" in
         # CONSUMER_BALANCING=1
         CONSUMER_ZSTD=1
         ;;
+
+    # Ablation studies
+    Direct-IO-Only)
+        PIN_ARGS="-buf_type 0 -comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        NOCACHE=1
+        CONSUMER_ABLATION="direct_io"
+        ;;
+    Hugepage-Only)
+        PIN_ARGS="-buf_type 0 -comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        NOCACHE=1
+        CONSUMER_ABLATION="hugepages"
+        ;;
+    App-Dilation-Only)
+        PIN_ARGS="-buf_type 0 -comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        NOCACHE=1
+        CONSUMER_ABLATION="app_dilation"
+        ;;
+    Kernel-Dilation-Only)
+        PIN_ARGS="-buf_type 0 -comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        NOCACHE=1
+        CONSUMER_ABLATION="kernel_dilation"
+        ;;
+    Compression-Only)
+        PIN_ARGS="-buf_type 0 -comp1 -1 -outprefix ${OUTPREFIX} ${PIN_EXTRA} ${DIST_FILE}"
+        NOCACHE=1
+        CONSUMER_ABLATION="compression"
+        ;;
+
     *)
         echo "Invalid Pin mode: $PIN_MODE"
         exit 1
@@ -461,10 +492,10 @@ for i in $(seq 1 "$NUM_TRIALS"); do
 
     # 3. CLEAN UP remote processes
     echo "--- Halting remote processes ---"
-    ssh "${REMOTE_HOST}" "sudo pkill -2 -f perf"
     if [[ $APP_NAME == mem* ]] || [[ $APP_NAME == sync_microbench* ]]; then
         ssh "${REMOTE_HOST}" "sudo pkill -2 -f /home/michael/software/memcached/memcached"
     fi
+    ssh "${REMOTE_HOST}" "sudo pkill -2 -f perf"
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f kthread_cputime.bt"
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f pid_syscall_profiler.bt"
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f packet_profiler.bt"
