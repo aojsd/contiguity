@@ -499,6 +499,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f kthread_cputime.bt"
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f pid_syscall_profiler.bt"
     ssh "${REMOTE_HOST}" "sudo pkill -2 -f packet_profiler.bt"
+    ssh "${REMOTE_HOST}" "sudo pkill -2 -f fault_vs_khugepaged.bt"
     wait $(jobs -p) # Wait for all background jobs (ssh <host> loop.sh) to finish
 
     if [ "$CPU_LIMIT" != "0" ]; then
@@ -521,6 +522,7 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.perf"                 "${APP_OUT_DIR}/${APP}_${PIN_MODE}_${i}.perf"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.kthread_cputime"      "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.kthread_cputime"
     scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.syscalls"             "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.syscalls"
+    scp "${REMOTE_HOST}:${TMP_DIR}/${NAME}.fault_khugepaged"    "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.fault_khugepaged"
     
     # Memcached-specific files
     if [[ $APP_NAME == mem* ]]; then
@@ -558,6 +560,8 @@ for i in $(seq 1 "$NUM_TRIALS"); do
     P_SRC_KWORK="${CONTIGUITY}/kernel_work/python"
     python3 "${P_SRC_KWORK}/kthread_parse.py" "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.kthread_cputime"
     python3 "${P_SRC_KWORK}/syscall_parse.py" "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.syscalls"
+    cp "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.fault_khugepaged" "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.fault_khugepaged.raw"
+    python3 "${P_SRC_KWORK}/fault_khugepaged_parse.py" "${SYS_DIR}/${APP}_${PIN_MODE}_${i}.fault_khugepaged"
 done
 
 echo "========================= All trials completed. ========================="

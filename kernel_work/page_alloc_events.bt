@@ -1,0 +1,30 @@
+#!/usr/bin/env bpftrace
+/*
+ * page_alloc_events.bt
+ *
+ * Logs individual buddy-allocator allocation events for scatter-plot
+ * visualization. Prints one line per allocation:
+ *   <elapsed_ns> <order> <migratetype> <comm>
+ *
+ * Usage: sudo ./page_alloc_events.bt
+ * Terminate with Ctrl-C.
+ */
+
+BEGIN
+{
+	@_start = nsecs;
+}
+
+tracepoint:kmem:mm_page_alloc
+{
+	printf("%lld %d %d %s\n",
+	       nsecs - @_start,
+	       args->order,
+	       args->migratetype,
+	       comm);
+}
+
+END
+{
+	clear(@_start);
+}

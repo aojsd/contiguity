@@ -24,6 +24,9 @@ sudo ${CONT_DIR}/kernel_work/kthread_cputime.bt > ${TMP_DIR}/${process_name}.kth
 # Profile system calls
 sudo ${CONT_DIR}/kernel_work/pid_syscall_profiler.bt ${pid} > ${TMP_DIR}/${process_name}.syscalls &
 
+# Profile page faults vs khugepaged collapse/scan activity
+sudo ${CONT_DIR}/kernel_work/fault_vs_khugepaged.bt ${pid} > ${TMP_DIR}/${process_name}.fault_khugepaged &
+
 # Only attach perf if the pin_mode is "native"
 if [ "${pin_mode}" == "native" ]; then
     EVENTS="instructions,L1-dcache-loads,L1-dcache-stores,rob_misc_events.pause_inst"

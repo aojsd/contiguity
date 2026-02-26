@@ -98,10 +98,10 @@ tracepoint:huge_memory:mm_khugepaged_scan_pmd
 END
 {
 	// Clean up scratch maps (underscore-prefixed)
+	clear(@_target_mm);
 	clear(@_fc_target);
 	clear(@_fc_any);
 	clear(@_fc_scan);
 	clear(@_last_collapse_ns);
 	clear(@_last_target_collapse_ns);
-	clear(@_target_mm);
 }
