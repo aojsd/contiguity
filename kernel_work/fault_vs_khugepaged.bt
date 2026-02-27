@@ -2,40 +2,96 @@
 /*
  * fault_vs_khugepaged.bt
  *
- * For a target PID ($1), prints the number of page faults between
- * successive khugepaged scan events. One line per scan:
- *     scan <fault_count>
+ * For a target PID ($1), traces soft page faults, khugepaged scan events,
+ * and khugepaged process invocations (scheduled on/off CPU), all with
+ * nanosecond-resolution timestamps relative to script start.
  *
- * This preserves event ordering — the sequence of numbers shows how
- * many faults accumulated between each consecutive pair of scans.
- * Scalar counters and scan status are dumped at END (SIGINT).
+ * Output format (one line per event):
+ *   fault          <elapsed_ns>
+ *   scan           <elapsed_ns> <status> <faults_since_last_scan>
+ *   khugepaged_on  <elapsed_ns>
+ *   khugepaged_off <elapsed_ns> <duration_ns>
+ *
+ * "fault" lines give precise timing of each user page fault for the
+ * target process.  "scan" lines capture every khugepaged PMD scan
+ * (system-wide), its status code, and how many target-PID faults
+ * occurred since the previous scan.  "khugepaged_on/off" lines bracket
+ * each khugepaged scheduling quantum so invocation frequency and
+ * duration can be compared against fault/scan activity.
+ *
+ * Aggregate counters (@total_faults, @total_scans, @scan_status,
+ * @khugepaged_durations, @khugepaged_total_ns, @khugepaged_invocations)
+ * are dumped at END (SIGINT).
  *
  * Usage: sudo ./fault_vs_khugepaged.bt <target_pid>
  * Terminate with SIGINT (Ctrl-C or pkill -2).
  *
  * Tracepoints (stable ABI, verified on 6.13.8 and 6.16.7):
- *   exceptions:page_fault_user       - address, ip, error_code
+ *   exceptions:page_fault_user        - address, ip, error_code
  *   huge_memory:mm_khugepaged_scan_pmd - mm, pfn, writable, referenced,
  *                                        none_or_zero, status, unmapped
+ *   sched:sched_switch                - prev/next pid/comm
+ *
+ * Khugepaged invocation tracking adapted from kthread_cputime.bt.
  */
+
+#define PF_KTHREAD 2097152
+
+BEGIN
+{
+	@_start = nsecs;
+	@_fc_scan = (int64)0;
+}
+
+/* --- Page faults for target PID --- */
 
 tracepoint:exceptions:page_fault_user
 /pid == $1/
 {
+	printf("fault %lld\n", nsecs - @_start);
 	@_fc_scan++;
 	@total_faults = count();
 }
 
+/* --- Khugepaged PMD scans (system-wide) --- */
+
 tracepoint:huge_memory:mm_khugepaged_scan_pmd
 {
-	printf("scan %lld\n", @_fc_scan);
+	printf("scan %lld %d %lld\n",
+	       nsecs - @_start,
+	       args->status,
+	       @_fc_scan);
 	@_fc_scan = 0;
 
 	@total_scans = count();
 	@scan_status[args->status] = count();
 }
 
+/* --- Khugepaged process invocations (scheduled on/off CPU) --- */
+
+kretprobe:schedule
+/comm == "khugepaged"/
+{
+	@_khd_on[tid] = nsecs;
+	printf("khugepaged_on %lld\n", nsecs - @_start);
+}
+
+tracepoint:sched:sched_switch
+/@_khd_on[args->prev_pid]/
+{
+	$duration = nsecs - @_khd_on[args->prev_pid];
+	printf("khugepaged_off %lld %lld\n", nsecs - @_start, $duration);
+
+	@khugepaged_durations = hist($duration);
+	@khugepaged_total_ns = sum($duration);
+	@khugepaged_invocations = count();
+
+	delete(@_khd_on[args->prev_pid]);
+}
+
 END
 {
+	clear(@_start);
 	clear(@_fc_scan);
+	clear(@_khd_on);
 }
